@@ -1,0 +1,21 @@
+{
+  "name": "rate-limiter-sandbox",
+  "version": "1.0.0",
+  "description": "Enterprise-Grade Rate Limiter and Algorithm Sandbox",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "benchmark": "node src/benchmark.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "prom-client": "^15.1.2",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.2"
+  }
+}

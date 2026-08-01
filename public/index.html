@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise Rate Limiter Sandbox</title>
+  <!-- Google Fonts for premium typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="status-indicator online"></span>
+        <h1>Rate Limiter <span class="accent">Sandbox & Telemetry</span></h1>
+      </div>
+      <div class="connection-status" id="ws-status">Connecting WebSocket...</div>
+    </header>
+
+    <div class="grid-layout">
+      <!-- SIDEBAR CONTROLS -->
+      <aside class="control-panel card">
+        <h2>Control Panel</h2>
+        
+
+
+        <!-- ALGORITHM & ENGINE SWITCHER -->
+        <div class="setting-group">
+          <label>Algorithm Selection</label>
+          <div class="toggle-buttons" id="algo-toggle">
+            <button class="toggle-btn active" data-value="token-bucket">Token Bucket</button>
+            <button class="toggle-btn" data-value="sliding-window">Sliding Window Log</button>
+          </div>
+        </div>
+
+
+
+        <hr />
+
+        <!-- REQUEST TRIGGERS -->
+        <div class="setting-group">
+          <label>Request Controller</label>
+          <div class="trigger-buttons">
+            <button class="btn btn-primary" id="btn-request">Send Request</button>
+            <button class="btn btn-secondary" id="btn-burst">Send Burst (x5)</button>
+          </div>
+        </div>
+
+        <!-- TRAFFIC GENERATOR -->
+        <div class="setting-group">
+          <div class="flex-label">
+            <label for="generator-toggle">Traffic Generator</label>
+            <span class="badge" id="generator-rate-display">2 req/sec</span>
+          </div>
+          <div class="generator-slider-wrapper">
+            <input type="range" id="generator-slider" min="0.5" max="10" step="0.5" value="2" disabled>
+            <label class="switch">
+              <input type="checkbox" id="generator-toggle">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </aside>
+
+      <!-- MAIN SANDBOX VIEW -->
+      <main class="sandbox-view">
+        
+        <!-- LIVE STATS CARDS -->
+        <div class="metrics-grid">
+          <div class="metric-card card">
+            <span class="metric-title">Requests Sent</span>
+            <span class="metric-value" id="stat-requests">0</span>
+          </div>
+          <div class="metric-card card success">
+            <span class="metric-title">Allowed (200 OK)</span>
+            <span class="metric-value" id="stat-success">0</span>
+          </div>
+          <div class="metric-card card error">
+            <span class="metric-title">Blocked (429)</span>
+            <span class="metric-value" id="stat-blocked">0</span>
+          </div>
+          <div class="metric-card card highlight">
+            <span class="metric-title">Capacity / Rem.</span>
+            <span class="metric-value" id="stat-remaining">- / -</span>
+          </div>
+        </div>
+
+        <!-- DUAL ALGORITHM DYNAMIC VISUALIZER -->
+        <div class="visualizer-container card">
+          <div class="visualizer-header">
+            <h3>Engine Visualization Sandbox</h3>
+            <span class="active-config-badge" id="active-config-badge">Token Bucket | Memory</span>
+          </div>
+          
+          <div class="visualizer-split">
+            <!-- TOKEN BUCKET CANVAS CONTAINER -->
+            <div class="visualizer-pane" id="token-bucket-pane">
+              <div class="pane-title">
+                <h4>Token Bucket Fluid Physics</h4>
+                <p>Tokens refill smoothly. Requests draw tokens out of the bottom.</p>
+              </div>
+              <div class="canvas-wrapper">
+                <canvas id="bucket-canvas"></canvas>
+                <div class="bucket-stats-overlay">
+                  <div>Tokens: <span id="overlay-tokens">0.00</span> / <span id="overlay-capacity">0</span></div>
+                  <div>Refill: <span id="overlay-refill">0</span>/sec</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SLIDING WINDOW LOG CONTAINER -->
+            <div class="visualizer-pane hidden" id="sliding-window-pane">
+              <div class="pane-title">
+                <h4>Sliding Window Timeline Log</h4>
+                <p>Requests are logged. Window slides rightward. Limit caps requests inside window.</p>
+              </div>
+              <div class="timeline-wrapper">
+                <div class="timeline-scale">
+                  <span>-10s</span>
+                  <span>-5s</span>
+                  <span>Now</span>
+                </div>
+                <div class="timeline-slider-track">
+                  <div class="timeline-window-overlay" id="timeline-window-overlay"></div>
+                  <div class="timeline-ticks-container" id="ticks-container"></div>
+                </div>
+                <div class="timeline-stats">
+                  <div>Active Window Hits: <span id="timeline-hits">0</span> / <span id="timeline-limit">0</span></div>
+                  <div>Window Scale: 10 seconds</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ADMIN KEYS PANEL -->
+        <div class="admin-panel card" id="admin-panel">
+          <div class="admin-header">
+            <h3>Admin Active Rate Limiting Keys</h3>
+            <button class="btn btn-danger btn-sm" id="btn-admin-clear">Flush All Storage</button>
+          </div>
+          <div class="admin-table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Client Identifier</th>
+                  <th>Algorithm</th>
+                  <th>Current State Metrics</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="admin-keys-body">
+                <tr>
+                  <td colspan="4" class="text-center text-muted">No keys logged in database.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- LOG FEED & CSV/JSON EXPORTS -->
+        <div class="log-panel card">
+          <div class="log-header">
+            <h3>Live Telemetry Stream</h3>
+            <div class="log-actions">
+              <button class="btn btn-secondary btn-sm" id="btn-export-csv">Export CSV</button>
+              <button class="btn btn-secondary btn-sm" id="btn-export-json">Export JSON</button>
+              <button class="btn btn-danger btn-sm" id="btn-clear-logs">Clear View</button>
+            </div>
+          </div>
+          <div class="log-table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Client</th>
+                  <th>Endpoint</th>
+                  <th>Status</th>
+                  <th>Latency</th>
+                  <th>Remaining</th>
+                  <th>Reset/Retry</th>
+                </tr>
+              </thead>
+              <tbody id="log-body">
+                <tr id="log-empty-row">
+                  <td colspan="7" class="text-center text-muted">Awaiting API requests...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
