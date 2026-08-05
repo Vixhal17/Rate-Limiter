@@ -17,8 +17,8 @@ export class RedisStorage extends StorageProvider {
     this.status = 'connecting';
     this.keyPrefix = 'rl:';
 
-    // Auto-detect TLS for cloud URLs (rediss://)
-    const isTls = this.redisUrl.startsWith('rediss://');
+    // Auto-detect TLS for cloud URLs (rediss:// or upstash.io)
+    const isTls = this.redisUrl.startsWith('rediss://') || this.redisUrl.includes('upstash.io');
     const tlsConfig = isTls ? { tls: { rejectUnauthorized: false } } : {};
 
     // Initialize Redis client with automatic reconnection and fallback safety
