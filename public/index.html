@@ -27,7 +27,7 @@
         
 
 
-        <!-- ALGORITHM & ENGINE SWITCHER -->
+        <!-- ALGORITHM SELECTION -->
         <div class="setting-group">
           <label>Algorithm Selection</label>
           <div class="toggle-buttons" id="algo-toggle">
@@ -36,7 +36,17 @@
           </div>
         </div>
 
-
+        <!-- STORAGE ENGINE SWITCHER -->
+        <div class="setting-group">
+          <div class="flex-label">
+            <label>Storage Engine</label>
+            <span class="redis-status-pill offline" id="redis-indicator">Redis Offline</span>
+          </div>
+          <div class="toggle-buttons" id="storage-toggle">
+            <button class="toggle-btn active" data-value="memory">In-Memory</button>
+            <button class="toggle-btn" data-value="redis">Redis (Distributed)</button>
+          </div>
+        </div>
 
         <hr />
 
@@ -177,6 +187,7 @@
                 <tr>
                   <th>Timestamp</th>
                   <th>Client</th>
+                  <th>Engine</th>
                   <th>Endpoint</th>
                   <th>Status</th>
                   <th>Latency</th>
@@ -186,7 +197,7 @@
               </thead>
               <tbody id="log-body">
                 <tr id="log-empty-row">
-                  <td colspan="7" class="text-center text-muted">Awaiting API requests...</td>
+                  <td colspan="8" class="text-center text-muted">Awaiting API requests...</td>
                 </tr>
               </tbody>
             </table>

@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import client from 'prom-client';
 
 import { MemoryStorage } from './storage/MemoryStorage.js';
+import { RedisStorage } from './storage/RedisStorage.js';
 import {
   rateLimiter,
   configureLimiter,
@@ -24,9 +25,16 @@ app.use(express.static('public'));
 
 // Initialize storage providers
 const memoryStorage = new MemoryStorage();
+const redisStorage = new RedisStorage();
 
-// Initial configuration of the rate limiter (default algorithm: token-bucket)
-configureLimiter(memoryStorage, 'token-bucket');
+let currentStorageType = 'memory';
+
+function getActiveStorage() {
+  return currentStorageType === 'redis' ? redisStorage : memoryStorage;
+}
+
+// Initial configuration of the rate limiter (default algorithm: token-bucket, storage: memory)
+configureLimiter(memoryStorage, 'token-bucket', 'memory');
 
 /* ==========================================================================
    API ENDPOINTS
@@ -50,39 +58,52 @@ app.get('/api/request', rateLimiter, (req, res) => {
  * Endpoint to inspect and update rate-limiter configuration.
  */
 app.get('/api/config', (req, res) => {
-  res.json(getLimiterState());
+  res.json({
+    ...getLimiterState(),
+    redis: redisStorage.getStatus()
+  });
 });
 
 app.post('/api/config', async (req, res) => {
-  const { algorithm } = req.body;
+  const { algorithm, storage } = req.body;
 
   if (algorithm && !['token-bucket', 'sliding-window'].includes(algorithm)) {
     return res.status(400).json({ error: 'Invalid algorithm specified' });
   }
 
+  if (storage && !['memory', 'redis'].includes(storage)) {
+    return res.status(400).json({ error: 'Invalid storage specified. Must be "memory" or "redis".' });
+  }
+
+  if (storage) {
+    currentStorageType = storage;
+  }
+
   // Apply new settings
   const targetAlgorithm = algorithm || getLimiterState().algorithm;
-  configureLimiter(memoryStorage, targetAlgorithm);
+  configureLimiter(getActiveStorage(), targetAlgorithm, currentStorageType);
 
   // Broadcast the updated configuration to all connected WebSocket clients
   broadcast({
     type: 'CONFIG_STATE',
-    config: getLimiterState()
+    config: getLimiterState(),
+    redis: redisStorage.getStatus()
   });
 
   res.json({
     success: true,
     message: 'Configuration updated successfully',
-    ...getLimiterState()
+    ...getLimiterState(),
+    redis: redisStorage.getStatus()
   });
 });
 
 /**
- * Admin API (RBAC protected): Retrieve list of all client rate limit bucket states.
+ * Admin API: Retrieve list of all client rate limit bucket states from active storage.
  */
 app.get('/api/admin/keys', async (req, res) => {
   try {
-    const keysData = await memoryStorage.getAllKeys();
+    const keysData = await getActiveStorage().getAllKeys();
     res.json(keysData);
   } catch (err) {
     console.error('Error fetching admin keys:', err);
@@ -91,11 +112,14 @@ app.get('/api/admin/keys', async (req, res) => {
 });
 
 /**
- * Admin API (RBAC protected): Flush all client states in storage.
+ * Admin API: Flush all client states in both memory and redis storage engines.
  */
 app.post('/api/admin/clear', async (req, res) => {
   try {
-    await memoryStorage.clearAll();
+    await Promise.all([
+      memoryStorage.clearAll(),
+      redisStorage.clearAll().catch((err) => console.warn('Redis clearAll skipped:', err.message))
+    ]);
     // Notify dashboard users of configuration reset
     broadcast({ type: 'RESET', timestamp: Date.now() });
     res.json({ success: true, message: 'All storage engines cleared.' });
@@ -128,10 +152,11 @@ const connectedClients = new Set();
 wss.on('connection', (ws) => {
   connectedClients.add(ws);
   
-  // Push initial configuration immediately on connection
+  // Push initial configuration & redis status immediately on connection
   ws.send(JSON.stringify({
     type: 'CONFIG_STATE',
-    config: getLimiterState()
+    config: getLimiterState(),
+    redis: redisStorage.getStatus()
   }));
 
   ws.on('close', () => {

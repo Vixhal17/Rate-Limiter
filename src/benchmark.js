@@ -1,8 +1,9 @@
 import { MemoryStorage } from './storage/MemoryStorage.js';
+import { RedisStorage } from './storage/RedisStorage.js';
 import { TokenBucketLimiter } from './algorithms/TokenBucketLimiter.js';
 
 // Configuration for the benchmark runs
-const TOTAL_OPERATIONS = 10000;
+const TOTAL_OPERATIONS = 5000;
 const CONCURRENT_BATCH_SIZE = 50; // Simulate multiple clients firing requests in batches
 const TEST_KEY = 'benchmark-client-key';
 const TIER_CONFIG = { capacity: 100000, refillRate: 5000 }; // High limits so we don't hit 429 locks
@@ -63,11 +64,31 @@ async function runBenchmark(name, storage, limiter) {
 }
 
 async function startSuite() {
-  // Setup Memory Storage Benchmark
+  // 1. Setup Memory Storage Benchmark
   const memStorage = new MemoryStorage();
   const memLimiter = new TokenBucketLimiter(memStorage);
-  
   await runBenchmark('Local In-Memory Engine', memStorage, memLimiter);
+
+  // 2. Setup Redis Storage Benchmark (if Redis is accessible)
+  try {
+    const redisStorage = new RedisStorage();
+    // Wait briefly for connection
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const status = redisStorage.getStatus();
+
+    if (status.isConnected) {
+      const redisLimiter = new TokenBucketLimiter(redisStorage);
+      await runBenchmark('Distributed Redis Engine', redisStorage, redisLimiter);
+      await redisStorage.clearAll();
+      await redisStorage.disconnect();
+    } else {
+      console.log(`\n[NOTE] Redis server not connected at ${status.redisUrl}. Skipping Redis benchmark.`);
+      console.log('To run Redis benchmark, start Redis: docker run -d -p 6379:6379 redis:alpine');
+      await redisStorage.disconnect();
+    }
+  } catch (err) {
+    console.log(`\n[NOTE] Redis benchmark skipped: ${err.message}`);
+  }
   
   console.log(`\n========================================`);
   console.log('Benchmark Suite Finished.');
@@ -75,3 +96,4 @@ async function startSuite() {
 }
 
 startSuite().catch(console.error);
+

@@ -10,6 +10,7 @@ export const LIMIT_CONFIG = {
 
 // Global active configuration state
 let activeStorage = null;
+let activeStorageName = 'memory'; // 'memory' | 'redis'
 let activeAlgorithmName = 'token-bucket'; // 'token-bucket' | 'sliding-window'
 let telemetryCallback = null;
 
@@ -33,10 +34,12 @@ const latencySummary = new client.Summary({
  * Configure the active storage provider and rate limiter algorithm.
  * @param {StorageProvider} storage - Storage engine instance
  * @param {string} algorithmName - 'token-bucket' | 'sliding-window'
+ * @param {string} storageName - 'memory' | 'redis'
  */
-export function configureLimiter(storage, algorithmName = 'token-bucket') {
+export function configureLimiter(storage, algorithmName = 'token-bucket', storageName = 'memory') {
   activeStorage = storage;
   activeAlgorithmName = algorithmName;
+  activeStorageName = storageName;
 }
 
 /**
@@ -59,7 +62,7 @@ export async function rateLimiter(req, res, next) {
   const clientName = `Client (${clientId})`;
   const clientTier = 'standard';
 
-  const storageMode = 'memory';
+  const storageMode = activeStorageName;
   const config = LIMIT_CONFIG[activeAlgorithmName];
   
   // Choose algorithm instance
@@ -141,6 +144,6 @@ export async function rateLimiter(req, res, next) {
 export function getLimiterState() {
   return {
     algorithm: activeAlgorithmName,
-    storage: 'memory'
+    storage: activeStorageName
   };
 }

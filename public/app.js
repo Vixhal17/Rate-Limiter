@@ -6,6 +6,8 @@ let state = {
   currentRemaining: null,
   currentCapacity: null,
   algorithm: 'token-bucket',
+  storage: 'memory',
+  redisStatus: null,
   logs: [],
   adminPollIntervalId: null,
   trafficGeneratorId: null
@@ -23,6 +25,8 @@ const LIMIT_CONFIG = {
 const wsStatus = document.getElementById('ws-status');
 const keyDisplay = document.getElementById('key-display');
 const algoToggle = document.getElementById('algo-toggle');
+const storageToggle = document.getElementById('storage-toggle');
+const redisIndicator = document.getElementById('redis-indicator');
 const btnRequest = document.getElementById('btn-request');
 const btnBurst = document.getElementById('btn-burst');
 const generatorToggle = document.getElementById('generator-toggle');
@@ -366,7 +370,7 @@ function connectWebSocket() {
     const msg = JSON.parse(event.data);
     
     if (msg.type === 'CONFIG_STATE') {
-      updateActiveToggles(msg.config.algorithm);
+      updateActiveToggles(msg.config.algorithm, msg.config.storage, msg.redis);
     } else if (msg.type === 'TELEMETRY_EVENT') {
       handleTelemetryEvent(msg.data);
     } else if (msg.type === 'RESET') {
@@ -433,10 +437,13 @@ function appendTableRow(event) {
   const timeStr = new Date(event.timestamp).toLocaleTimeString();
   const badgeClass = event.allowed ? 'success' : 'blocked';
   const badgeText = event.allowed ? '200 OK' : '429 Blocked';
+  const storageClass = (event.storageMode || 'memory').toLowerCase();
+  const storageLabel = storageClass === 'redis' ? 'Redis' : 'Memory';
   
   const rowHtml = `
     <td><span class="log-time">${timeStr}</span></td>
     <td><span class="log-val-mono">${event.clientId}</span></td>
+    <td><span class="log-storage-tag ${storageClass}">${storageLabel}</span></td>
     <td><span class="log-val-mono">${event.method} ${event.url}</span></td>
     <td><span class="log-row-badge ${badgeClass}">${badgeText}</span></td>
     <td><span class="log-latency">${event.latencyMs}ms</span></td>
@@ -457,14 +464,37 @@ function appendTableRow(event) {
 }
 
 // Update settings switches to reflect active configuration
-function updateActiveToggles(algorithm) {
+function updateActiveToggles(algorithm, storage = state.storage, redisInfo = state.redisStatus) {
   state.algorithm = algorithm;
+  state.storage = storage;
+  if (redisInfo) {
+    state.redisStatus = redisInfo;
+  }
 
   // Toggle algorithm elements
   const algoButtons = algoToggle.querySelectorAll('.toggle-btn');
   algoButtons.forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === algorithm);
   });
+
+  // Toggle storage buttons
+  if (storageToggle) {
+    const storageButtons = storageToggle.querySelectorAll('.toggle-btn');
+    storageButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.value === storage);
+    });
+  }
+
+  // Update Redis status indicator pill
+  if (redisIndicator && state.redisStatus) {
+    if (state.redisStatus.isConnected) {
+      redisIndicator.className = 'redis-status-pill online';
+      redisIndicator.innerText = 'Redis Online';
+    } else {
+      redisIndicator.className = 'redis-status-pill offline';
+      redisIndicator.innerText = state.redisStatus.status === 'connecting' ? 'Redis Connecting' : 'Redis Offline';
+    }
+  }
 
   // Toggle visualization columns
   if (algorithm === 'token-bucket') {
@@ -487,7 +517,9 @@ function updateActiveToggles(algorithm) {
   }
 
   // Update header descriptions
-  activeConfigBadge.innerText = `${algorithm.replace('-', ' ')}`;
+  const algoName = algorithm === 'token-bucket' ? 'Token Bucket' : 'Sliding Window Log';
+  const engineName = storage === 'redis' ? 'Redis' : 'In-Memory';
+  activeConfigBadge.innerText = `${algoName} | ${engineName}`;
   
   // Set capacity stats metrics cleanly
   if (state.currentRemaining !== null) {
@@ -510,9 +542,6 @@ function updateActiveToggles(algorithm) {
 async function sendRequest() {
   try {
     const res = await fetch('/api/request');
-    // Note: We don't need to manually decode and draw stats here because
-    // the server WebSocket will push the resulting statistics to handleTelemetryEvent.
-    // However, if the server returns non-limiter error we log it.
     if (!res.ok && res.status !== 429) {
       console.error('Request failed:', await res.text());
     }
@@ -521,17 +550,17 @@ async function sendRequest() {
   }
 }
 
-// Dynamic dynamic updates of backend config switches
-async function postEngineConfig(algorithm) {
+// Dynamic updates of backend config switches
+async function postEngineConfig(algorithm = state.algorithm, storage = state.storage) {
   try {
     const res = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ algorithm })
+      body: JSON.stringify({ algorithm, storage })
     });
     const data = await res.json();
     if (!data.success) {
-      alert(data.message || 'Config update rejected by server.');
+      alert(data.message || data.error || 'Config update rejected by server.');
     }
   } catch (err) {
     alert('Failed to connect to backend engine: ' + err.message);
@@ -543,8 +572,18 @@ algoToggle.addEventListener('click', (e) => {
   const btn = e.target.closest('.toggle-btn');
   if (!btn) return;
   const val = btn.dataset.value;
-  postEngineConfig(val);
+  postEngineConfig(val, state.storage);
 });
+
+// Configure Storage switch listeners
+if (storageToggle) {
+  storageToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn) return;
+    const val = btn.dataset.value;
+    postEngineConfig(state.algorithm, val);
+  });
+}
 
 // Request trigger listeners
 btnRequest.addEventListener('click', () => {

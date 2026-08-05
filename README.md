@@ -1,12 +1,13 @@
 # 🚀 Enterprise Rate Limiter Sandbox & Telemetry Platform
 
-A high-performance, developer-focused rate-limiting engine implementing dual core algorithms (**Token Bucket** and **Sliding Window Log**) in pure Node.js (ES Modules). The project features a glassmorphic dashboard utilizing an HTML5 Canvas physics visualizer, live WebSocket push telemetry, Prometheus scraper integration, and a CLI benchmarking harness.
+A high-performance, developer-focused rate-limiting engine implementing dual core algorithms (**Token Bucket** and **Sliding Window Log**) with dual storage engines (**In-Memory** and **Distributed Redis**) in pure Node.js (ES Modules). The project features a glassmorphic dashboard utilizing an HTML5 Canvas physics visualizer, live WebSocket push telemetry, Prometheus scraper integration, and a CLI benchmarking harness.
 
 ---
 
 ## 📸 Dashboard Preview
 
 Once launched, access the dark-cyber dashboard served locally at `http://localhost:3000`. 
+*   **Dual Storage Engine Switcher**: Toggle seamlessly between high-speed local In-Memory storage and production-ready distributed Redis.
 *   **Token Bucket Canvas**: Features a physical glass beaker showing floating plasma tokens bobbing, droplets refilling from a top faucet, and bubbles releasing from a bottom spout on consumption.
 *   **Sliding Window Track**: Shows request ticks sliding from right (now) to left (10 seconds ago) and dissolving as they expire.
 *   **Live Metrics**: Counters for total requests, successes, and blocks, alongside a live remaining capacity count.
@@ -18,6 +19,7 @@ Once launched, access the dark-cyber dashboard served locally at `http://localho
 
 *   **Runtime Engine**: Node.js (ES Modules)
 *   **Web Framework**: Express.js
+*   **Distributed Storage**: Redis via `ioredis` (Hashes + Sorted Sets)
 *   **WebSocket Engine**: `ws` (Custom streaming payload broadcaster)
 *   **Monitoring & Telemetry**: `prom-client` (Prometheus exposition format)
 *   **Dashboard Frontend**: HTML5, Vanilla CSS3 (Neon-cyber variables & glassmorphic layout), HTML5 Canvas Physics Engine, WebSocket client
@@ -38,15 +40,30 @@ Once launched, access the dark-cyber dashboard served locally at `http://localho
 │   │   └── SlidingWindowLogLimiter.js # Timestamp log sliding algorithm
 │   ├── middleware/         # Express Request Filters
 │   │   └── limiter.js      # Middleware router, metrics recorder & WS logger
-│   ├── storage/            # Memory Storage Engine
+│   ├── storage/            # Dual Storage Engines
 │   │   ├── StorageProvider.js  # Abstract storage interface contract
-│   │   └── MemoryStorage.js    # Thread-safe JS Map storage provider
+│   │   ├── MemoryStorage.js    # Thread-safe JS Map storage provider
+│   │   └── RedisStorage.js     # Distributed Redis storage provider (ioredis)
 │   ├── benchmark.js        # CLI performance concurrency benchmark
 │   ├── server.js           # Server bootstrap, route mappings & WS hub
 │   └── verify.js           # E2E API integration validation test runner
 ├── package.json            # Scripts & project dependencies
 └── README.md               # Documentation
 ```
+
+---
+
+## 🗄️ Storage Engine Implementations
+
+### 1. In-Memory Engine (`MemoryStorage.js`)
+*   Zero network latency (~0.002ms latency).
+*   Stored in local process memory using JavaScript `Map`.
+
+### 2. Redis Engine (`RedisStorage.js`)
+*   Distributed across multiple backend workers / server replicas.
+*   **Token Bucket**: Stored in Redis Hashes (`HSET rl:tb:<key> tokens <val> lastRefill <timestamp>`) with automatic key expiry.
+*   **Sliding Window Log**: Stored in Redis Sorted Sets (`ZADD rl:sw:<key> <timestamp> <uuid>`) utilizing atomic score range queries (`ZRANGEBYSCORE`, `ZREMRANGEBYSCORE`).
+*   **Resilience**: Graceful connection handling; falls back smoothly if Redis is temporarily unreachable.
 
 ---
 
@@ -92,25 +109,31 @@ Rate limits are applied per client using their incoming **IP Address** (`req.ip`
     }
     ```
 
-### 2. Sandbox Configuration
+### 2. Sandbox Configuration & Engine Switch
 *   **Endpoint**: `GET /api/config` / `POST /api/config`
-*   **Payload**: `{ "algorithm": "token-bucket" | "sliding-window" }`
-*   **Access**: Public (Triggers realtime WebSocket layout changes on the dashboard).
+*   **Payload**:
+    ```json
+    {
+      "algorithm": "token-bucket", // "token-bucket" | "sliding-window"
+      "storage": "redis"          // "memory" | "redis"
+    }
+    ```
+*   **Access**: Public (Triggers realtime WebSocket layout changes on all connected dashboards).
 
 ### 3. Retrieve Active Tracker Keys
 *   **Endpoint**: `GET /api/admin/keys`
 *   **Access**: Public
-*   **Response**: Lists active clients and their database bucket stats.
+*   **Response**: Lists active clients and their database bucket stats from the currently active storage engine.
 
-### 4. Clear Database
+### 4. Clear Storage
 *   **Endpoint**: `POST /api/admin/clear`
-*   **Access**: Public (Flushes active keys, alerts clients to reset stats).
+*   **Access**: Public (Flushes active keys from both Memory and Redis, alerts clients to reset stats).
 
 ### 5. Prometheus Scraper Metrics
 *   **Endpoint**: `GET /metrics`
 *   **Metrics Exposed**:
-    *   `rate_limiter_requests_total{status, algorithm}`: Total requests.
-    *   `rate_limiter_latency_seconds`: Validation latency summary.
+    *   `rate_limiter_requests_total{client_tier, status, algorithm, storage_mode}`: Total requests.
+    *   `rate_limiter_latency_seconds{algorithm, storage_mode}`: Validation latency summary.
     *   Standard Node.js process and memory telemetry.
 
 ---
@@ -118,12 +141,19 @@ Rate limits are applied per client using their incoming **IP Address** (`req.ip`
 ## ⚡ Setup & Execution
 
 ### 1. Install Dependencies
-Ensure you have Node.js (version 18+) installed. Clone or navigate to the directory and run:
+Ensure you have Node.js (version 18+) installed.
 ```bash
 npm install
 ```
 
-### 2. Start the Telemetry Server
+### 2. (Optional) Start Redis with Docker
+To enable the distributed Redis storage engine:
+```bash
+docker run -d --name redis-rate-limiter -p 6379:6379 redis:alpine
+```
+*Optional environment variable: `REDIS_URL=redis://127.0.0.1:6379`*
+
+### 3. Start the Telemetry Server
 Launches the Express server and WebSocket socket hub:
 ```bash
 npm start
@@ -131,22 +161,22 @@ npm start
 *   **Console Output**: Logs bootstrap information and opens port `3000`.
 *   **Dashboard URL**: Open `http://localhost:3000` in your web browser.
 
-### 3. Run Automated Validation Checks
-Executes E2E assertions against the active server (verifies the 10-call threshold, headers, and endpoints):
+### 4. Run Automated Validation Checks
+Executes E2E assertions against the active server (verifies threshold, headers, algorithms, and endpoints):
 ```bash
 node src/verify.js
 ```
 
-### 4. Run Concurrency Benchmarks
-Fires high-speed local rate-limiter validations (10,000 ops in concurrent batches) and displays latency percentiles and throughput:
+### 5. Run Concurrency Benchmarks
+Fires high-speed rate-limiter validations (5,000 ops in concurrent batches) and displays latency percentiles and throughput for both In-Memory and Redis engines:
 ```bash
 npm run benchmark
 ```
-*   **Expected Throughput**: ~`500,000` to `600,000` operations/second on modern standard processors.
 
 ---
 
 ## 📊 Telemetry Exporter
-From the dashboard, every API call's latency, payload status, and HTTP headers are logged in a live-stream table. You can export this telemetry data instantly by clicking:
-1.  **Export CSV**: Generates a standard `.csv` file format.
+From the dashboard, every API call's latency, storage mode, payload status, and HTTP headers are logged in a live-stream table. You can export this telemetry data instantly by clicking:
+1.  **Export CSV**: Generates a standard `.csv` file format including storage mode.
 2.  **Export JSON**: Generates a structured `.json` object array of logs.
+

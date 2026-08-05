@@ -30,8 +30,8 @@ async function runTests() {
   assert.strictEqual(resetRes.status, 200, 'Admin clear should succeed');
   console.log('✓ Storage reset successfully.');
 
-  // 2. Set config to Token Bucket
-  console.log('\n[TEST 2] Configuring to Token Bucket...');
+  // 2. Set config to Token Bucket + Memory Storage
+  console.log('\n[TEST 2] Configuring to Token Bucket (Memory)...');
   const configRes = await fetch(`${BASE_URL}/api/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -39,7 +39,9 @@ async function runTests() {
   });
   const configData = await configRes.json();
   assert.strictEqual(configData.algorithm, 'token-bucket');
-  console.log('✓ Algorithm configured to Token Bucket.');
+  assert.strictEqual(configData.storage, 'memory');
+  assert.ok(configData.redis, 'Config response should include redis status');
+  console.log(`✓ Algorithm configured to Token Bucket on ${configData.storage} storage (Redis status: ${configData.redis.status}).`);
 
   // 3. Test Rate Limits (Capacity 10, Refill 1/sec)
   console.log('\n[TEST 3] Testing rate limits...');
