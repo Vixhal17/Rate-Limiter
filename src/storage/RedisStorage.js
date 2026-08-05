@@ -17,6 +17,10 @@ export class RedisStorage extends StorageProvider {
     this.status = 'connecting';
     this.keyPrefix = 'rl:';
 
+    // Auto-detect TLS for cloud URLs (rediss://)
+    const isTls = this.redisUrl.startsWith('rediss://');
+    const tlsConfig = isTls ? { tls: { rejectUnauthorized: false } } : {};
+
     // Initialize Redis client with automatic reconnection and fallback safety
     this.client = new Redis(this.redisUrl, {
       maxRetriesPerRequest: 1,
@@ -25,6 +29,7 @@ export class RedisStorage extends StorageProvider {
         return Math.min(times * 200, 5000);
       },
       enableOfflineQueue: false, // Fail fast if disconnected rather than hanging requests
+      ...tlsConfig,
       ...options
     });
 
