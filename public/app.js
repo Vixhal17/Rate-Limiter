@@ -1,3 +1,7 @@
+// ==========================================================================
+// RATELAB SANDBOX & TELEMETRY APPLICATION LOGIC (DASHBOARD)
+// ==========================================================================
+
 // Global application state
 let state = {
   requests: 0,
@@ -23,22 +27,42 @@ const LIMIT_CONFIG = {
 // DOM ELEMENT REFERENCES
 // ==========================================================================
 const wsStatus = document.getElementById('ws-status');
-const keyDisplay = document.getElementById('key-display');
+const wsStatusText = document.getElementById('ws-status-text');
+const heroStatusText = document.getElementById('hero-status-text');
+const heroConnectionPill = document.getElementById('hero-connection-pill');
 const algoToggle = document.getElementById('algo-toggle');
 const storageToggle = document.getElementById('storage-toggle');
 const redisIndicator = document.getElementById('redis-indicator');
+const redisIndicatorText = document.getElementById('redis-indicator-text');
+const redisBadgeStatus = document.getElementById('redis-badge-status');
+
 const btnRequest = document.getElementById('btn-request');
 const btnBurst = document.getElementById('btn-burst');
 const generatorToggle = document.getElementById('generator-toggle');
 const generatorSlider = document.getElementById('generator-slider');
 const generatorRateDisplay = document.getElementById('generator-rate-display');
+const stepperRateText = document.getElementById('stepper-rate-text');
 
 // Metrics elements
 const statRequests = document.getElementById('stat-requests');
 const statSuccess = document.getElementById('stat-success');
 const statBlocked = document.getElementById('stat-blocked');
 const statRemaining = document.getElementById('stat-remaining');
+const capacitySublabelText = document.getElementById('capacity-sublabel-text');
 const activeConfigBadge = document.getElementById('active-config-badge');
+
+// Decision path nodes
+const flowIncomingVal = document.getElementById('flow-incoming-val');
+const flowRateVal = document.getElementById('flow-rate-val');
+const flowAllowedVal = document.getElementById('flow-allowed-val');
+const flowBlockedVal = document.getElementById('flow-blocked-val');
+const decisionLimiterTitle = document.getElementById('decision-limiter-title');
+const decisionLimiterStatus = document.getElementById('decision-limiter-status');
+const mainLimiterNodeBox = document.getElementById('main-limiter-node-box');
+const summaryDecisionText = document.getElementById('summary-decision-text');
+const summaryPolicyDecision = document.getElementById('summary-policy-decision');
+const summaryRefillText = document.getElementById('summary-refill-text');
+const summaryPersistenceText = document.getElementById('summary-persistence-text');
 
 // View panes
 const tokenBucketPane = document.getElementById('token-bucket-pane');
@@ -56,7 +80,7 @@ const btnClearLogs = document.getElementById('btn-clear-logs');
 
 // Canvas
 const canvas = document.getElementById('bucket-canvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas ? canvas.getContext('2d') : null;
 const overlayTokens = document.getElementById('overlay-tokens');
 const overlayCapacity = document.getElementById('overlay-capacity');
 const overlayRefill = document.getElementById('overlay-refill');
@@ -68,12 +92,13 @@ const timelineLimit = document.getElementById('timeline-limit');
 
 // Resize canvas to parent size
 function resizeCanvas() {
+  if (!canvas || !canvas.parentElement) return;
   const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height || 300;
+  canvas.width = rect.width || 400;
+  canvas.height = rect.height || 220;
 }
 window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
+setTimeout(resizeCanvas, 100);
 
 // ==========================================================================
 // PHYSIC ANIMATION SYSTEM (TOKEN BUCKET CANVAS)
@@ -89,17 +114,15 @@ class Particle {
   constructor(x, y) {
     this.x = x;
     this.y = y;
-    this.r = Math.random() * 6 + 6;
-    this.vx = (Math.random() - 0.5) * 1.5;
-    this.vy = (Math.random() - 0.5) * 1.5;
-    this.color = 'hsla(185, 100%, 50%, 0.7)';
-    this.glow = 'rgba(0, 229, 255, 0.4)';
+    this.r = Math.random() * 4 + 5;
+    this.vx = (Math.random() - 0.5) * 1.2;
+    this.vy = (Math.random() - 0.5) * 1.2;
+    this.color = '#ea580c';
   }
   update(width, height, bucketBottom, bucketTop, bucketLeft, bucketRight) {
     this.x += this.vx;
     this.y += this.vy;
 
-    // Boundary physics constraints inside the visual bucket
     if (this.x - this.r < bucketLeft) {
       this.x = bucketLeft + this.r;
       this.vx *= -0.8;
@@ -118,13 +141,11 @@ class Particle {
     }
   }
   draw() {
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = this.glow;
+    if (!ctx) return;
     ctx.fillStyle = this.color;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0; // reset
   }
 }
 
@@ -133,15 +154,16 @@ class Drop {
     this.x = x;
     this.y = y;
     this.targetY = targetY;
-    this.vy = 4;
-    this.r = 4;
+    this.vy = 4.5;
+    this.r = 3.5;
   }
   update() {
     this.y += this.vy;
     return this.y >= this.targetY;
   }
   draw() {
-    ctx.fillStyle = '#00e5ff';
+    if (!ctx) return;
+    ctx.fillStyle = '#fb923c';
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
     ctx.fill();
@@ -149,24 +171,25 @@ class Drop {
 }
 
 class Spark {
-  constructor(x, y, color = '#bd00ff') {
+  constructor(x, y, color = '#ea580c') {
     this.x = x;
     this.y = y;
-    this.r = Math.random() * 3 + 2;
-    this.vx = (Math.random() - 0.5) * 4;
-    this.vy = Math.random() * 3 + 1;
+    this.r = Math.random() * 3 + 1.5;
+    this.vx = (Math.random() - 0.5) * 3.5;
+    this.vy = Math.random() * 2.5 + 1;
     this.alpha = 1;
     this.color = color;
   }
   update() {
     this.x += this.vx;
     this.y += this.vy;
-    this.alpha -= 0.03;
+    this.alpha -= 0.035;
     return this.alpha <= 0;
   }
   draw() {
+    if (!ctx) return;
     ctx.fillStyle = this.color;
-    ctx.globalAlpha = this.alpha;
+    ctx.globalAlpha = Math.max(0, this.alpha);
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
     ctx.fill();
@@ -174,82 +197,74 @@ class Spark {
   }
 }
 
-// Populate particles dynamically to match active token counts
 function syncParticleCounts() {
+  if (!canvas) return;
   const targetCount = Math.floor(displayedTokens);
   if (particles.length < targetCount) {
-    // Add particle
     const w = canvas.width;
     const h = canvas.height;
     const bucketLeft = w / 2 - 60;
     const bucketRight = w / 2 + 60;
-    const bucketBottom = h - 60;
+    const bucketBottom = h - 45;
     const fillPercent = displayedTokens / maxCapacity;
-    const bucketTop = bucketBottom - (150 * fillPercent);
+    const bucketTop = bucketBottom - (130 * fillPercent);
     
     const rx = bucketLeft + Math.random() * 120;
-    const ry = bucketTop + Math.random() * (bucketBottom - bucketTop);
+    const ry = bucketTop + Math.random() * Math.max(10, bucketBottom - bucketTop);
     particles.push(new Particle(rx, ry));
   } else if (particles.length > targetCount) {
-    // Release particle from bottom spout
     const popped = particles.shift();
     if (popped) {
-      // Create drain sparks
       const w = canvas.width;
       const h = canvas.height;
-      for (let i = 0; i < 8; i++) {
-        bottomSparks.push(new Spark(w / 2, h - 50, '#00e5ff'));
+      for (let i = 0; i < 6; i++) {
+        bottomSparks.push(new Spark(w / 2, h - 40, '#ea580c'));
       }
     }
   }
 }
 
-// Refill trigger from ticker
 let lastTickTime = Date.now();
 function animateBucketPhysics() {
+  if (!ctx || !canvas) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   const w = canvas.width;
   const h = canvas.height;
   
-  const bucketLeft = w / 2 - 70;
-  const bucketRight = w / 2 + 70;
-  const bucketBottom = h - 50;
-  const bucketTop = bucketBottom - 180;
+  const bucketLeft = w / 2 - 65;
+  const bucketRight = w / 2 + 65;
+  const bucketBottom = h - 40;
+  const bucketTop = bucketBottom - 140;
   
-  // Smoothly increment local tokens towards target
   const now = Date.now();
   const elapsed = (now - lastTickTime) / 1000;
   lastTickTime = now;
   
   if (state.algorithm === 'token-bucket' && state.currentRemaining !== null) {
-    maxCapacity = state.currentCapacity;
+    maxCapacity = state.currentCapacity || 10;
     refillRate = LIMIT_CONFIG['token-bucket'].refillRate;
     
-    // Refill continuously up to capacity
     displayedTokens = Math.min(maxCapacity, displayedTokens + elapsed * refillRate);
     
-    // Update visual stats and labels in real-time
-    overlayTokens.innerText = displayedTokens.toFixed(2);
-    overlayCapacity.innerText = maxCapacity;
-    overlayRefill.innerText = refillRate;
-    statRemaining.innerText = `${Math.floor(displayedTokens)} / ${maxCapacity}`;
+    if (overlayTokens) overlayTokens.innerText = displayedTokens.toFixed(2);
+    if (overlayCapacity) overlayCapacity.innerText = maxCapacity;
+    if (overlayRefill) overlayRefill.innerText = refillRate;
+    if (statRemaining) statRemaining.innerText = `${Math.floor(displayedTokens)} / ${maxCapacity}`;
   }
   
   syncParticleCounts();
 
-  // 1. Draw Spigot (Top) and Faucet falling drops
-  ctx.fillStyle = '#1a1f2e';
-  ctx.fillRect(w / 2 - 10, bucketTop - 35, 20, 15);
-  ctx.fillStyle = '#2d3748';
-  ctx.fillRect(w / 2 - 6, bucketTop - 20, 12, 10);
+  // 1. Spigot (Top)
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(w / 2 - 10, bucketTop - 30, 20, 14);
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(w / 2 - 6, bucketTop - 16, 12, 10);
   
-  // Generate visual refilling drops at interval
-  if (state.algorithm === 'token-bucket' && Math.random() < (refillRate * 0.05)) {
-    refillDrops.push(new Drop(w / 2, bucketTop - 10, bucketBottom - (170 * (displayedTokens / maxCapacity))));
+  if (state.algorithm === 'token-bucket' && Math.random() < (refillRate * 0.06)) {
+    refillDrops.push(new Drop(w / 2, bucketTop - 10, bucketBottom - (130 * (displayedTokens / maxCapacity))));
   }
 
-  // Update & Draw falling drops
   for (let i = refillDrops.length - 1; i >= 0; i--) {
     const isFinished = refillDrops[i].update();
     refillDrops[i].draw();
@@ -258,31 +273,31 @@ function animateBucketPhysics() {
     }
   }
 
-  // 2. Draw Beaker Container (Bucket outline)
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-  ctx.lineWidth = 4;
+  // 2. Beaker Outline
+  ctx.strokeStyle = '#475569';
+  ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(bucketLeft, bucketTop);
   ctx.lineTo(bucketLeft, bucketBottom);
-  ctx.lineTo(w / 2 - 10, bucketBottom); // Left side of spout
-  ctx.moveTo(w / 2 + 10, bucketBottom); // Right side of spout
+  ctx.lineTo(w / 2 - 10, bucketBottom);
+  ctx.moveTo(w / 2 + 10, bucketBottom);
   ctx.lineTo(bucketRight, bucketBottom);
   ctx.lineTo(bucketRight, bucketTop);
   ctx.stroke();
 
   // Spout base
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-  ctx.fillRect(w / 2 - 10, bucketBottom, 20, 12);
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(w / 2 - 10, bucketBottom, 20, 8);
 
-  // 3. Update & Draw tokens (particles) inside bucket bounds
-  const fillLevelTop = bucketBottom - (170 * (displayedTokens / maxCapacity));
+  // 3. Tokens (particles)
+  const fillLevelTop = bucketBottom - (130 * (displayedTokens / maxCapacity));
   particles.forEach(p => {
-    p.update(w, h, bucketBottom - 5, fillLevelTop + 10, bucketLeft + 8, bucketRight - 8);
+    p.update(w, h, bucketBottom - 5, fillLevelTop + 8, bucketLeft + 6, bucketRight - 6);
     p.draw();
   });
 
-  // 4. Update & Draw exhaust sparks
+  // 4. Exhaust sparks
   for (let i = bottomSparks.length - 1; i >= 0; i--) {
     const isDead = bottomSparks[i].update();
     bottomSparks[i].draw();
@@ -295,20 +310,20 @@ function animateBucketPhysics() {
 }
 requestAnimationFrame(animateBucketPhysics);
 
-// Trigger visual block animation (Red sparks at the spout)
 function flashBlockedSparks() {
+  if (!canvas) return;
   const w = canvas.width;
   const h = canvas.height;
   for (let i = 0; i < 12; i++) {
-    bottomSparks.push(new Spark(w / 2, h - 50, '#f43f5e'));
+    bottomSparks.push(new Spark(w / 2, h - 40, '#dc2626'));
   }
 }
 
 // ==========================================================================
 // TIMELINE LOG SYSTEM (SLIDING WINDOW)
 // ==========================================================================
-let activeTicks = []; // Array of ticks { timestamp, allowed }
-const WINDOW_DURATION_MS = 10000; // 10 seconds
+let activeTicks = [];
+const WINDOW_DURATION_MS = 10000;
 
 function updateSlidingWindowTimeline() {
   if (state.algorithm !== 'sliding-window') return;
@@ -316,31 +331,28 @@ function updateSlidingWindowTimeline() {
   const now = Date.now();
   const threshold = now - WINDOW_DURATION_MS;
 
-  // Prune ticks older than 10 seconds
   activeTicks = activeTicks.filter(tick => tick.timestamp > threshold);
   
-  // Render active window hits count
   const allowedHits = activeTicks.filter(t => t.allowed).length;
-  timelineHits.innerText = allowedHits;
+  if (timelineHits) timelineHits.innerText = allowedHits;
   
-  // Render main remaining metrics card in real-time as requests slide out
   const limit = LIMIT_CONFIG['sliding-window'].limit;
-  statRemaining.innerText = `${limit - allowedHits} / ${limit}`;
+  if (statRemaining) statRemaining.innerText = `${Math.max(0, limit - allowedHits)} / ${limit}`;
 
-  // Reposition tick elements in DOM
-  ticksContainer.innerHTML = '';
-  activeTicks.forEach(tick => {
-    const elapsed = now - tick.timestamp;
-    const percentFromRight = (elapsed / WINDOW_DURATION_MS) * 100;
-    
-    // If it's within the window bounds, place it
-    if (percentFromRight >= 0 && percentFromRight <= 100) {
-      const tickEl = document.createElement('div');
-      tickEl.className = `timeline-tick ${tick.allowed ? '' : 'blocked'}`;
-      tickEl.style.right = `${percentFromRight}%`;
-      ticksContainer.appendChild(tickEl);
-    }
-  });
+  if (ticksContainer) {
+    ticksContainer.innerHTML = '';
+    activeTicks.forEach(tick => {
+      const elapsed = now - tick.timestamp;
+      const percentFromRight = (elapsed / WINDOW_DURATION_MS) * 100;
+      
+      if (percentFromRight >= 0 && percentFromRight <= 100) {
+        const tickEl = document.createElement('div');
+        tickEl.className = `timeline-tick ${tick.allowed ? '' : 'blocked'}`;
+        tickEl.style.right = `${percentFromRight}%`;
+        ticksContainer.appendChild(tickEl);
+      }
+    });
+  }
 
   requestAnimationFrame(updateSlidingWindowTimeline);
 }
@@ -356,13 +368,15 @@ function connectWebSocket() {
   ws = new WebSocket(wsUrl);
   
   ws.onopen = () => {
-    wsStatus.innerText = 'Connected';
-    wsStatus.className = 'connection-status online';
+    if (wsStatus) wsStatus.className = 'status-pill online';
+    if (wsStatusText) wsStatusText.innerText = 'Connected';
+    if (heroStatusText) heroStatusText.innerText = 'Connected';
   };
   
   ws.onclose = () => {
-    wsStatus.innerText = 'Disconnected. Retrying...';
-    wsStatus.className = 'connection-status offline';
+    if (wsStatus) wsStatus.className = 'status-pill offline';
+    if (wsStatusText) wsStatusText.innerText = 'Retrying...';
+    if (heroStatusText) heroStatusText.innerText = 'Connecting...';
     setTimeout(connectWebSocket, 2000);
   };
   
@@ -382,7 +396,6 @@ connectWebSocket();
 
 // Handle events pushed from the server WebSocket
 function handleTelemetryEvent(event) {
-  // Update state counters
   state.requests += 1;
   if (event.allowed) {
     state.success += 1;
@@ -393,49 +406,62 @@ function handleTelemetryEvent(event) {
   state.currentRemaining = event.remaining;
   state.currentCapacity = event.capacity;
   
-  // Render counters
-  statRequests.innerText = state.requests;
-  statSuccess.innerText = state.success;
-  statBlocked.innerText = state.blocked;
+  if (statRequests) statRequests.innerText = state.requests;
+  if (statSuccess) statSuccess.innerText = state.success;
+  if (statBlocked) statBlocked.innerText = state.blocked;
+
+  // Update Decision Path Flow Elements
+  if (flowIncomingVal) flowIncomingVal.innerText = state.requests;
+  if (flowAllowedVal) flowAllowedVal.innerText = state.success;
+  if (flowBlockedVal) flowBlockedVal.innerText = state.blocked;
   
-  // Update Token Bucket specific variables
+  if (summaryDecisionText) {
+    summaryDecisionText.innerText = event.allowed ? 'Request accepted' : 'Rate limit exceeded';
+    const dot = summaryPolicyDecision ? summaryPolicyDecision.querySelector('.dot') : null;
+    if (dot) {
+      dot.style.backgroundColor = event.allowed ? 'var(--semantic-success)' : 'var(--semantic-error)';
+    }
+  }
+
+  // Visual pulse on active node
+  if (mainLimiterNodeBox) {
+    mainLimiterNodeBox.style.transform = 'scale(1.02)';
+    setTimeout(() => {
+      mainLimiterNodeBox.style.transform = 'scale(1)';
+    }, 120);
+  }
+  
   if (state.algorithm === 'token-bucket') {
-    // Snap local physics to exact server count on call
     displayedTokens = event.remaining;
-    
-    // Triggers block particle burst if rate-limited
     if (!event.allowed) {
       flashBlockedSparks();
     }
   }
 
-  // Update Sliding Window specific variables
   if (state.algorithm === 'sliding-window') {
-    // Append to visual sliding log
     activeTicks.push({
       timestamp: event.timestamp,
       allowed: event.allowed
     });
   }
 
-  // Push to local log stream array (capped at 500 lines)
+  // Keep strictly the last 15 records in memory state
   state.logs.unshift(event);
-  if (state.logs.length > 500) {
+  if (state.logs.length > 15) {
     state.logs.pop();
   }
 
-  // Append new row in table UI
   appendTableRow(event);
 }
 
-// Appends telemetry logs directly in dashboard table
+// Appends telemetry logs directly in dashboard table (capped at last 15 records)
 function appendTableRow(event) {
   if (logEmptyRow) {
     logEmptyRow.style.display = 'none';
   }
   
   const timeStr = new Date(event.timestamp).toLocaleTimeString();
-  const badgeClass = event.allowed ? 'success' : 'blocked';
+  const badgeClass = event.allowed ? 'success' : 'error';
   const badgeText = event.allowed ? '200 OK' : '429 Blocked';
   const storageClass = (event.storageMode || 'memory').toLowerCase();
   const storageLabel = storageClass === 'redis' ? 'Redis' : 'Memory';
@@ -445,7 +471,7 @@ function appendTableRow(event) {
     <td><span class="log-val-mono">${event.clientId}</span></td>
     <td><span class="log-storage-tag ${storageClass}">${storageLabel}</span></td>
     <td><span class="log-val-mono">${event.method} ${event.url}</span></td>
-    <td><span class="log-row-badge ${badgeClass}">${badgeText}</span></td>
+    <td><span class="badge badge-${badgeClass}">${badgeText}</span></td>
     <td><span class="log-latency">${event.latencyMs}ms</span></td>
     <td><span class="log-val-mono">${Math.floor(event.remaining)}/${event.capacity}</span></td>
     <td><span class="log-val-mono">${event.allowed ? event.resetTimeSecs + 's (fill)' : event.retryAfter + 's (retry)'}</span></td>
@@ -454,12 +480,11 @@ function appendTableRow(event) {
   const tr = document.createElement('tr');
   tr.innerHTML = rowHtml;
   
-  // Prepend to top of logs stream table
-  logBody.insertBefore(tr, logBody.firstChild);
-  
-  // Keep logs view to max 50 rows in DOM to avoid lag
-  if (logBody.children.length > 50) {
-    logBody.removeChild(logBody.lastChild);
+  if (logBody) {
+    logBody.insertBefore(tr, logBody.firstChild);
+    while (logBody.children.length > 15) {
+      logBody.removeChild(logBody.lastChild);
+    }
   }
 }
 
@@ -471,13 +496,11 @@ function updateActiveToggles(algorithm, storage = state.storage, redisInfo = sta
     state.redisStatus = redisInfo;
   }
 
-  // Toggle algorithm elements
-  const algoButtons = algoToggle.querySelectorAll('.toggle-btn');
+  const algoButtons = algoToggle ? algoToggle.querySelectorAll('.toggle-btn') : [];
   algoButtons.forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === algorithm);
   });
 
-  // Toggle storage buttons
   if (storageToggle) {
     const storageButtons = storageToggle.querySelectorAll('.toggle-btn');
     storageButtons.forEach(btn => {
@@ -485,52 +508,62 @@ function updateActiveToggles(algorithm, storage = state.storage, redisInfo = sta
     });
   }
 
-  // Update Redis status indicator pill
   if (redisIndicator && state.redisStatus) {
     if (state.redisStatus.isConnected) {
-      redisIndicator.className = 'redis-status-pill online';
-      redisIndicator.innerText = 'Redis Online';
+      redisIndicator.className = 'status-pill online';
+      redisIndicatorText.innerText = 'Redis Online';
+      if (redisBadgeStatus) {
+        redisBadgeStatus.className = 'storage-status-tag';
+        redisBadgeStatus.innerText = 'Redis Online';
+      }
     } else {
-      redisIndicator.className = 'redis-status-pill offline';
-      redisIndicator.innerText = state.redisStatus.status === 'connecting' ? 'Redis Connecting' : 'Redis Offline';
+      redisIndicator.className = 'status-pill offline';
+      redisIndicatorText.innerText = state.redisStatus.status === 'connecting' ? 'Redis Connecting' : 'Redis Offline';
+      if (redisBadgeStatus) {
+        redisBadgeStatus.className = 'storage-status-tag offline';
+        redisBadgeStatus.innerText = 'Redis Offline';
+      }
     }
   }
 
-  // Toggle visualization columns
   if (algorithm === 'token-bucket') {
-    tokenBucketPane.classList.remove('hidden');
-    slidingWindowPane.classList.add('hidden');
+    if (tokenBucketPane) tokenBucketPane.classList.remove('hidden');
+    if (slidingWindowPane) slidingWindowPane.classList.add('hidden');
+    if (capacitySublabelText) capacitySublabelText.innerText = 'Token bucket balance';
+    if (decisionLimiterTitle) decisionLimiterTitle.innerText = 'Token Bucket';
+    if (summaryRefillText) summaryRefillText.innerText = '1 token / second';
     
-    // Set initial bucket overlay tokens on load if we haven't received telemetry yet
     if (state.currentRemaining === null) {
       maxCapacity = LIMIT_CONFIG['token-bucket'].capacity;
       refillRate = LIMIT_CONFIG['token-bucket'].refillRate;
       displayedTokens = maxCapacity;
-      overlayTokens.innerText = maxCapacity.toFixed(2);
-      overlayCapacity.innerText = maxCapacity;
-      overlayRefill.innerText = refillRate;
+      if (overlayTokens) overlayTokens.innerText = maxCapacity.toFixed(2);
+      if (overlayCapacity) overlayCapacity.innerText = maxCapacity;
+      if (overlayRefill) overlayRefill.innerText = refillRate;
     }
   } else {
-    tokenBucketPane.classList.add('hidden');
-    slidingWindowPane.classList.remove('hidden');
+    if (tokenBucketPane) tokenBucketPane.classList.add('hidden');
+    if (slidingWindowPane) slidingWindowPane.classList.remove('hidden');
+    if (capacitySublabelText) capacitySublabelText.innerText = '10s sliding window';
+    if (decisionLimiterTitle) decisionLimiterTitle.innerText = 'Sliding Window Log';
+    if (summaryRefillText) summaryRefillText.innerText = '10s window (10 limit)';
     requestAnimationFrame(updateSlidingWindowTimeline);
   }
 
-  // Update header descriptions
   const algoName = algorithm === 'token-bucket' ? 'Token Bucket' : 'Sliding Window Log';
-  const engineName = storage === 'redis' ? 'Redis' : 'In-Memory';
-  activeConfigBadge.innerText = `${algoName} | ${engineName}`;
+  const engineName = storage === 'redis' ? 'Redis Cluster' : 'In-Memory';
+  if (activeConfigBadge) activeConfigBadge.innerText = `${algoName} · ${engineName}`;
+  if (summaryPersistenceText) summaryPersistenceText.innerText = engineName;
   
-  // Set capacity stats metrics cleanly
   if (state.currentRemaining !== null) {
-    statRemaining.innerText = `${Math.floor(state.currentRemaining)} / ${state.currentCapacity}`;
+    if (statRemaining) statRemaining.innerText = `${Math.floor(state.currentRemaining)} / ${state.currentCapacity}`;
   } else {
     const config = LIMIT_CONFIG[algorithm];
     const cap = algorithm === 'token-bucket' ? config.capacity : config.limit;
-    statRemaining.innerText = `${cap} / ${cap}`;
+    if (statRemaining) statRemaining.innerText = `${cap} / ${cap}`;
   }
 
-  if (algorithm === 'sliding-window') {
+  if (algorithm === 'sliding-window' && timelineLimit) {
     timelineLimit.innerText = LIMIT_CONFIG['sliding-window'].limit;
     activeTicks = [];
   }
@@ -550,7 +583,6 @@ async function sendRequest() {
   }
 }
 
-// Dynamic updates of backend config switches
 async function postEngineConfig(algorithm = state.algorithm, storage = state.storage) {
   try {
     const res = await fetch('/api/config', {
@@ -567,15 +599,15 @@ async function postEngineConfig(algorithm = state.algorithm, storage = state.sto
   }
 }
 
-// Configure Algorithm switch listeners
-algoToggle.addEventListener('click', (e) => {
-  const btn = e.target.closest('.toggle-btn');
-  if (!btn) return;
-  const val = btn.dataset.value;
-  postEngineConfig(val, state.storage);
-});
+if (algoToggle) {
+  algoToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn) return;
+    const val = btn.dataset.value;
+    postEngineConfig(val, state.storage);
+  });
+}
 
-// Configure Storage switch listeners
 if (storageToggle) {
   storageToggle.addEventListener('click', (e) => {
     const btn = e.target.closest('.toggle-btn');
@@ -585,43 +617,62 @@ if (storageToggle) {
   });
 }
 
-// Request trigger listeners
-btnRequest.addEventListener('click', () => {
-  sendRequest();
-});
-
-btnBurst.addEventListener('click', () => {
-  // Fire 5 requests immediately
-  for (let i = 0; i < 5; i++) {
+if (btnRequest) {
+  btnRequest.addEventListener('click', () => {
     sendRequest();
-  }
-});
+  });
+}
 
-// Traffic generator slider configuration
-generatorToggle.addEventListener('change', (e) => {
-  const checked = e.target.checked;
-  generatorSlider.disabled = !checked;
-  
-  if (checked) {
-    startTrafficGenerator();
-  } else {
-    stopTrafficGenerator();
-  }
-});
+if (btnBurst) {
+  btnBurst.addEventListener('click', () => {
+    for (let i = 0; i < 5; i++) {
+      sendRequest();
+    }
+  });
+}
 
-generatorSlider.addEventListener('input', () => {
-  const rate = generatorSlider.value;
-  generatorRateDisplay.innerText = `${rate} req/sec`;
+// Stepper controller for Traffic Rate
+window.stepTrafficRate = function(delta) {
+  if (!generatorSlider) return;
+  let current = parseFloat(generatorSlider.value) || 2;
+  current = Math.min(10, Math.max(0.5, current + delta));
+  generatorSlider.value = current;
+  updateRateVisuals(current);
+};
+
+function updateRateVisuals(rate) {
+  if (generatorRateDisplay) generatorRateDisplay.innerText = `${rate} req/sec`;
+  if (stepperRateText) stepperRateText.innerText = `${rate} / sec`;
+  if (flowRateVal) flowRateVal.innerText = `${rate}/s`;
   
-  if (generatorToggle.checked) {
-    // Restart generator at new rate
+  if (generatorToggle && generatorToggle.checked) {
     stopTrafficGenerator();
     startTrafficGenerator();
   }
-});
+}
+
+if (generatorToggle) {
+  generatorToggle.addEventListener('change', (e) => {
+    const checked = e.target.checked;
+    if (generatorSlider) generatorSlider.disabled = !checked;
+    
+    if (checked) {
+      startTrafficGenerator();
+    } else {
+      stopTrafficGenerator();
+    }
+  });
+}
+
+if (generatorSlider) {
+  generatorSlider.addEventListener('input', () => {
+    const rate = generatorSlider.value;
+    updateRateVisuals(rate);
+  });
+}
 
 function startTrafficGenerator() {
-  const rate = parseFloat(generatorSlider.value);
+  const rate = parseFloat(generatorSlider ? generatorSlider.value : 2);
   const intervalMs = 1000 / rate;
   state.trafficGeneratorId = setInterval(sendRequest, intervalMs);
 }
@@ -633,10 +684,11 @@ function stopTrafficGenerator() {
   }
 }
 
-// Clear buttons listeners
-btnClearLogs.addEventListener('click', () => {
-  clearViewStats();
-});
+if (btnClearLogs) {
+  btnClearLogs.addEventListener('click', () => {
+    clearViewStats();
+  });
+}
 
 function clearViewStats() {
   state.requests = 0;
@@ -644,25 +696,29 @@ function clearViewStats() {
   state.blocked = 0;
   state.logs = [];
   
-  statRequests.innerText = '0';
-  statSuccess.innerText = '0';
-  statBlocked.innerText = '0';
+  if (statRequests) statRequests.innerText = '0';
+  if (statSuccess) statSuccess.innerText = '0';
+  if (statBlocked) statBlocked.innerText = '0';
+  if (flowIncomingVal) flowIncomingVal.innerText = '0';
+  if (flowAllowedVal) flowAllowedVal.innerText = '0';
+  if (flowBlockedVal) flowBlockedVal.innerText = '0';
   
-  logBody.innerHTML = '';
-  if (logEmptyRow) {
-    logEmptyRow.style.display = 'table-row';
-    logBody.appendChild(logEmptyRow);
+  if (logBody) {
+    logBody.innerHTML = '';
+    if (logEmptyRow) {
+      logEmptyRow.style.display = 'table-row';
+      logBody.appendChild(logEmptyRow);
+    }
   }
   activeTicks = [];
 }
 
 // ==========================================================================
-// ADMIN WORKSPACE ACTIONS & ACTIVE KEYS REPORTING
+// ADMIN KEYS REPORTING
 // ==========================================================================
 async function fetchAdminKeys() {
   try {
     const res = await fetch('/api/admin/keys');
-    
     const keys = await res.json();
     renderAdminKeys(keys);
   } catch (err) {
@@ -671,7 +727,8 @@ async function fetchAdminKeys() {
 }
 
 function renderAdminKeys(keys) {
-  if (keys.length === 0) {
+  if (!adminKeysBody) return;
+  if (!keys || keys.length === 0) {
     adminKeysBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No keys logged in active engine.</td></tr>`;
     return;
   }
@@ -679,28 +736,24 @@ function renderAdminKeys(keys) {
   adminKeysBody.innerHTML = '';
   keys.forEach(k => {
     let stateString = '';
-    
     if (k.type === 'token-bucket') {
-      stateString = `<span class="admin-badge">Remaining tokens: ${k.data.tokens}</span> <span class="admin-badge">Last update: ${new Date(k.data.lastRefillTime).toLocaleTimeString()}</span>`;
+      stateString = `<span class="badge">Remaining: ${k.data.tokens}</span> <span class="badge">Updated: ${new Date(k.data.lastRefillTime).toLocaleTimeString()}</span>`;
     } else {
-      stateString = `<span class="admin-badge">Window hits: ${k.data.count}</span> <span class="admin-badge">Logs: [${k.data.timestamps.map(t => new Date(t).toLocaleTimeString()).join(', ')}]</span>`;
+      stateString = `<span class="badge">Hits: ${k.data.count}</span> <span class="badge">Logs: [${k.data.timestamps.map(t => new Date(t).toLocaleTimeString()).join(', ')}]</span>`;
     }
     
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><strong style="color:var(--primary-color)">${k.key}</strong></td>
-      <td><span class="badge" style="background:none;border-color:var(--border-color);color:var(--text-secondary)">${k.type}</span></td>
+      <td><strong style="color:var(--color-primary)">${k.key}</strong></td>
+      <td><span class="badge">${k.type}</span></td>
       <td>${stateString}</td>
-      <td><button class="btn btn-danger btn-sm text-center" style="padding:4px 8px;border-radius:4px" onclick="clearSpecificClient('${k.key}')">Reset</button></td>
+      <td><button class="btn btn-danger btn-sm" onclick="clearSpecificClient('${k.key}')">Reset</button></td>
     `;
     adminKeysBody.appendChild(tr);
   });
 }
 
-// Global scope window helper to flush specific keys from admin workspace
 window.clearSpecificClient = async function(key) {
-  // Simple hack: We don't have a specific DELETE route, let's flush all or we can implement it
-  // But standard clear is fine.
   console.log('Resetting client key:', key);
 };
 
@@ -709,78 +762,82 @@ function startAdminPolling() {
   state.adminPollIntervalId = setInterval(fetchAdminKeys, 1500);
 }
 
-function stopAdminPolling() {
-  if (state.adminPollIntervalId) {
-    clearInterval(state.adminPollIntervalId);
-    state.adminPollIntervalId = null;
-  }
-}
+if (btnAdminClear) {
+  btnAdminClear.addEventListener('click', async () => {
+    const confirmClear = confirm('Are you sure you want to clear rate limiting history for ALL databases?');
+    if (!confirmClear) return;
 
-btnAdminClear.addEventListener('click', async () => {
-  const confirmClear = confirm('Are you sure you want to clear rate limiting history for ALL databases?');
-  if (!confirmClear) return;
-
-  try {
-    const res = await fetch('/api/admin/clear', {
-      method: 'POST'
-    });
-    const data = await res.json();
-    if (data.success) {
-      fetchAdminKeys();
-    } else {
-      alert(data.error || 'Failed to clear database.');
+    try {
+      const res = await fetch('/api/admin/clear', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        fetchAdminKeys();
+      } else {
+        alert(data.error || 'Failed to clear database.');
+      }
+    } catch (err) {
+      alert('Admin command error: ' + err.message);
     }
-  } catch (err) {
-    alert('Admin command error: ' + err.message);
-  }
-});
+  });
+}
 
 // ==========================================================================
 // TELEMETRY LOGS EXPORT MODULE (CSV / JSON)
 // ==========================================================================
-btnExportJson.addEventListener('click', () => {
+window.exportSessionData = function() {
   if (state.logs.length === 0) {
-    alert('No telemetry data available for export.');
+    alert('No telemetry session data to export yet. Send some requests first!');
     return;
   }
-  const jsonContent = JSON.stringify(state.logs, null, 2);
-  const blob = new Blob([jsonContent], { type: 'application/json' });
-  triggerFileDownload(blob, 'rate_limiter_telemetry.json');
-});
+  if (btnExportCsv) btnExportCsv.click();
+};
 
-btnExportCsv.addEventListener('click', () => {
-  if (state.logs.length === 0) {
-    alert('No telemetry data available for export.');
-    return;
-  }
-
-  // Construct CSV headers & contents
-  const headers = ['Timestamp', 'ClientID', 'ClientName', 'Tier', 'Algorithm', 'StorageMode', 'Allowed', 'Remaining', 'Capacity', 'LatencyMs', 'ResetTimeSecs', 'Method', 'Url'];
-  const csvRows = [headers.join(',')];
-
-  state.logs.forEach(log => {
-    const row = [
-      new Date(log.timestamp).toISOString(),
-      log.clientId,
-      `"${log.clientName}"`,
-      log.clientTier,
-      log.algorithm,
-      log.storageMode,
-      log.allowed ? 'TRUE' : 'FALSE',
-      log.remaining.toFixed(3),
-      log.capacity,
-      log.latencyMs,
-      log.resetTimeSecs,
-      log.method,
-      log.url
-    ];
-    csvRows.push(row.join(','));
+if (btnExportJson) {
+  btnExportJson.addEventListener('click', () => {
+    if (state.logs.length === 0) {
+      alert('No telemetry data available for export.');
+      return;
+    }
+    const jsonContent = JSON.stringify(state.logs, null, 2);
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+    triggerFileDownload(blob, 'rate_limiter_telemetry.json');
   });
+}
 
-  const csvContent = csvRows.join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv' });
-  triggerFileDownload(blob, 'rate_limiter_telemetry.csv');
-});
+if (btnExportCsv) {
+  btnExportCsv.addEventListener('click', () => {
+    if (state.logs.length === 0) {
+      alert('No telemetry data available for export.');
+      return;
+    }
+
+    const headers = ['Timestamp', 'ClientID', 'ClientName', 'Tier', 'Algorithm', 'StorageMode', 'Allowed', 'Remaining', 'Capacity', 'LatencyMs', 'ResetTimeSecs', 'Method', 'Url'];
+    const csvRows = [headers.join(',')];
+
+    state.logs.forEach(log => {
+      const row = [
+        new Date(log.timestamp).toISOString(),
+        log.clientId,
+        `"${log.clientName || 'Sandbox User'}"`,
+        log.clientTier || 'standard',
+        log.algorithm,
+        log.storageMode,
+        log.allowed ? 'TRUE' : 'FALSE',
+        (log.remaining || 0).toFixed(2),
+        log.capacity,
+        log.latencyMs,
+        log.resetTimeSecs,
+        log.method,
+        log.url
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    triggerFileDownload(blob, 'rate_limiter_telemetry.csv');
+  });
+}
 
 function triggerFileDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -793,5 +850,5 @@ function triggerFileDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-// Initialize key table polling automatically on page load
+// Start background admin polling
 startAdminPolling();

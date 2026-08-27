@@ -3,209 +3,405 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Enterprise Rate Limiter Sandbox</title>
-  <!-- Google Fonts for premium typography -->
+  <title>RateLab — Rate Limiter Sandbox & Telemetry</title>
+  <meta name="description" content="Test traffic policies, tune request flow, and inspect every decision made by your rate limiting engine.">
+  
+  <!-- Google Fonts: Lora, Fraunces, Plus Jakarta Sans, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,600&family=Lora:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app-container">
-    <header class="app-header">
-      <div class="logo-area">
-        <span class="status-indicator online"></span>
-        <h1>Rate Limiter <span class="accent">Sandbox & Telemetry</span></h1>
+
+  <!-- ====================================================================
+       TOP NAVIGATION BAR (CLEAN DASHBOARD HEADER - NO SIDEBAR)
+       ==================================================================== -->
+  <nav class="top-nav" id="main-nav">
+    <div class="nav-brand" id="brand-logo">
+      <div class="brand-icon-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
       </div>
-      <div class="connection-status" id="ws-status">Connecting WebSocket...</div>
-    </header>
-
-    <div class="grid-layout">
-      <!-- SIDEBAR CONTROLS -->
-      <aside class="control-panel card">
-        <h2>Control Panel</h2>
-        
-
-
-        <!-- ALGORITHM SELECTION -->
-        <div class="setting-group">
-          <label>Algorithm Selection</label>
-          <div class="toggle-buttons" id="algo-toggle">
-            <button class="toggle-btn active" data-value="token-bucket">Token Bucket</button>
-            <button class="toggle-btn" data-value="sliding-window">Sliding Window Log</button>
-          </div>
-        </div>
-
-        <!-- STORAGE ENGINE SWITCHER -->
-        <div class="setting-group">
-          <div class="flex-label">
-            <label>Storage Engine</label>
-            <span class="redis-status-pill offline" id="redis-indicator">Redis Offline</span>
-          </div>
-          <div class="toggle-buttons" id="storage-toggle">
-            <button class="toggle-btn active" data-value="memory">In-Memory</button>
-            <button class="toggle-btn" data-value="redis">Redis (Distributed)</button>
-          </div>
-        </div>
-
-        <hr />
-
-        <!-- REQUEST TRIGGERS -->
-        <div class="setting-group">
-          <label>Request Controller</label>
-          <div class="trigger-buttons">
-            <button class="btn btn-primary" id="btn-request">Send Request</button>
-            <button class="btn btn-secondary" id="btn-burst">Send Burst (x5)</button>
-          </div>
-        </div>
-
-        <!-- TRAFFIC GENERATOR -->
-        <div class="setting-group">
-          <div class="flex-label">
-            <label for="generator-toggle">Traffic Generator</label>
-            <span class="badge" id="generator-rate-display">2 req/sec</span>
-          </div>
-          <div class="generator-slider-wrapper">
-            <input type="range" id="generator-slider" min="0.5" max="10" step="0.5" value="2" disabled>
-            <label class="switch">
-              <input type="checkbox" id="generator-toggle">
-              <span class="slider"></span>
-            </label>
-          </div>
-        </div>
-      </aside>
-
-      <!-- MAIN SANDBOX VIEW -->
-      <main class="sandbox-view">
-        
-        <!-- LIVE STATS CARDS -->
-        <div class="metrics-grid">
-          <div class="metric-card card">
-            <span class="metric-title">Requests Sent</span>
-            <span class="metric-value" id="stat-requests">0</span>
-          </div>
-          <div class="metric-card card success">
-            <span class="metric-title">Allowed (200 OK)</span>
-            <span class="metric-value" id="stat-success">0</span>
-          </div>
-          <div class="metric-card card error">
-            <span class="metric-title">Blocked (429)</span>
-            <span class="metric-value" id="stat-blocked">0</span>
-          </div>
-          <div class="metric-card card highlight">
-            <span class="metric-title">Capacity / Rem.</span>
-            <span class="metric-value" id="stat-remaining">- / -</span>
-          </div>
-        </div>
-
-        <!-- DUAL ALGORITHM DYNAMIC VISUALIZER -->
-        <div class="visualizer-container card">
-          <div class="visualizer-header">
-            <h3>Engine Visualization Sandbox</h3>
-            <span class="active-config-badge" id="active-config-badge">Token Bucket | Memory</span>
-          </div>
-          
-          <div class="visualizer-split">
-            <!-- TOKEN BUCKET CANVAS CONTAINER -->
-            <div class="visualizer-pane" id="token-bucket-pane">
-              <div class="pane-title">
-                <h4>Token Bucket Fluid Physics</h4>
-                <p>Tokens refill smoothly. Requests draw tokens out of the bottom.</p>
-              </div>
-              <div class="canvas-wrapper">
-                <canvas id="bucket-canvas"></canvas>
-                <div class="bucket-stats-overlay">
-                  <div>Tokens: <span id="overlay-tokens">0.00</span> / <span id="overlay-capacity">0</span></div>
-                  <div>Refill: <span id="overlay-refill">0</span>/sec</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- SLIDING WINDOW LOG CONTAINER -->
-            <div class="visualizer-pane hidden" id="sliding-window-pane">
-              <div class="pane-title">
-                <h4>Sliding Window Timeline Log</h4>
-                <p>Requests are logged. Window slides rightward. Limit caps requests inside window.</p>
-              </div>
-              <div class="timeline-wrapper">
-                <div class="timeline-scale">
-                  <span>-10s</span>
-                  <span>-5s</span>
-                  <span>Now</span>
-                </div>
-                <div class="timeline-slider-track">
-                  <div class="timeline-window-overlay" id="timeline-window-overlay"></div>
-                  <div class="timeline-ticks-container" id="ticks-container"></div>
-                </div>
-                <div class="timeline-stats">
-                  <div>Active Window Hits: <span id="timeline-hits">0</span> / <span id="timeline-limit">0</span></div>
-                  <div>Window Scale: 10 seconds</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ADMIN KEYS PANEL -->
-        <div class="admin-panel card" id="admin-panel">
-          <div class="admin-header">
-            <h3>Admin Active Rate Limiting Keys</h3>
-            <button class="btn btn-danger btn-sm" id="btn-admin-clear">Flush All Storage</button>
-          </div>
-          <div class="admin-table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Client Identifier</th>
-                  <th>Algorithm</th>
-                  <th>Current State Metrics</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="admin-keys-body">
-                <tr>
-                  <td colspan="4" class="text-center text-muted">No keys logged in database.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- LOG FEED & CSV/JSON EXPORTS -->
-        <div class="log-panel card">
-          <div class="log-header">
-            <h3>Live Telemetry Stream</h3>
-            <div class="log-actions">
-              <button class="btn btn-secondary btn-sm" id="btn-export-csv">Export CSV</button>
-              <button class="btn btn-secondary btn-sm" id="btn-export-json">Export JSON</button>
-              <button class="btn btn-danger btn-sm" id="btn-clear-logs">Clear View</button>
-            </div>
-          </div>
-          <div class="log-table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Client</th>
-                  <th>Engine</th>
-                  <th>Endpoint</th>
-                  <th>Status</th>
-                  <th>Latency</th>
-                  <th>Remaining</th>
-                  <th>Reset/Retry</th>
-                </tr>
-              </thead>
-              <tbody id="log-body">
-                <tr id="log-empty-row">
-                  <td colspan="8" class="text-center text-muted">Awaiting API requests...</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
+      <div class="brand-meta">
+        <span class="brand-name">RateLab</span>
+        <span class="brand-tagline">Traffic systems</span>
+      </div>
     </div>
+
+    <!-- SYSTEM STATUS & HEADER CONTROLS -->
+    <div class="nav-actions">
+      <div class="status-pill offline" id="redis-indicator">
+        <span class="status-dot"></span>
+        <span id="redis-indicator-text">Redis Offline</span>
+      </div>
+      <div class="status-pill online" id="ws-status">
+        <span class="status-dot"></span>
+        <span id="ws-status-text">Connected</span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="app-container">
+
+    <!-- ====================================================================
+         DASHBOARD / SANDBOX VIEW (MATCHING REFERENCE IMAGE)
+         ==================================================================== -->
+    <main class="page-view active" id="page-overview">
+      
+      <!-- HERO HEADER CARD (DARK MIDNIGHT SLATE) -->
+      <div class="hero-header-card">
+        <div class="hero-content">
+          <div class="hero-eyebrow">
+            <span class="dot"></span>
+            <span>Live Workspace</span>
+          </div>
+          <h1 class="hero-title">Rate limiter sandbox</h1>
+          <p class="hero-subhead">Test traffic policies, tune the request flow, and inspect every decision made by your engine.</p>
+        </div>
+        <div class="hero-actions">
+          <div class="hero-pill-badge" id="hero-connection-pill">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+              <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+              <line x1="12" y1="20" x2="12.01" y2="20"></line>
+            </svg>
+            <span id="hero-status-text">Connected</span>
+          </div>
+          <button class="btn-hero-action" id="btn-hero-export" onclick="exportSessionData()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Export session</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- TOP METRIC CARDS ROW (4 REFINED STAT CARDS) -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-header">Requests Sent</div>
+          <div class="metric-value" id="stat-requests">0</div>
+          <div class="metric-footer accent-orange">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            <span>Current session</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">Allowed · 200 OK</div>
+          <div class="metric-value" id="stat-success">0</div>
+          <div class="metric-footer accent-green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Passed policy</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">Blocked · 429</div>
+          <div class="metric-value" id="stat-blocked">0</div>
+          <div class="metric-footer accent-red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+            </svg>
+            <span>Rate exceeded</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">Capacity Remaining</div>
+          <div class="metric-value" id="stat-remaining">10 / 10</div>
+          <div class="metric-footer accent-orange">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+            <span id="capacity-sublabel-text">Token bucket balance</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- MAIN SPLIT WORKSPACE GRID (LEFT: POLICY CONTROLS | RIGHT: DECISION PATH) -->
+      <div class="workspace-grid">
+        
+        <!-- LEFT COLUMN: POLICY CONTROLS -->
+        <div class="card policy-controls-card">
+          <div class="card-header-box">
+            <h2 class="card-title">Policy controls</h2>
+            <div class="card-subtitle">Configure the engine before sending traffic.</div>
+          </div>
+
+          <!-- ALGORITHM SELECTION -->
+          <div class="control-section">
+            <div class="section-label-row">
+              <span class="section-label">Algorithm</span>
+            </div>
+            <div class="toggle-options-grid" id="algo-toggle">
+              <button class="toggle-btn active" data-value="token-bucket">
+                <span>Token Bucket</span>
+              </button>
+              <button class="toggle-btn" data-value="sliding-window">
+                <span>Sliding Window Log</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- STORAGE BACKEND SELECTION -->
+          <div class="control-section">
+            <div class="section-label-row">
+              <span class="section-label">Storage</span>
+              <span class="storage-status-tag" id="redis-badge-status">Redis Offline</span>
+            </div>
+            <div class="toggle-options-grid" id="storage-toggle">
+              <button class="toggle-btn active" data-value="memory">
+                <span>In-Memory</span>
+              </button>
+              <button class="toggle-btn" data-value="redis">
+                <span>Redis Cluster</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- REQUEST CONTROLLER -->
+          <div class="control-section">
+            <div class="section-label-row">
+              <span class="section-label">Request Controller</span>
+            </div>
+            <div class="request-btn-group">
+              <button class="btn-primary-send" id="btn-request">Send request</button>
+              <button class="btn-secondary-burst" id="btn-burst">Send burst ×5</button>
+            </div>
+          </div>
+
+          <!-- TRAFFIC RATE GENERATOR -->
+          <div class="control-section">
+            <div class="section-label-row">
+              <span class="section-label">Traffic Rate</span>
+              <span class="rate-badge" id="generator-rate-display">2 req/sec</span>
+            </div>
+            
+            <div class="rate-stepper-box">
+              <button class="stepper-btn" id="btn-rate-decrement" onclick="stepTrafficRate(-0.5)">—</button>
+              <span class="stepper-value-text" id="stepper-rate-text">2 / sec</span>
+              <button class="stepper-btn" id="btn-rate-increment" onclick="stepTrafficRate(0.5)">+</button>
+            </div>
+
+            <div class="generator-slider-row">
+              <input type="range" id="generator-slider" min="0.5" max="10" step="0.5" value="2" disabled>
+            </div>
+
+            <div class="auto-traffic-row">
+              <span class="auto-traffic-label">Automatic traffic</span>
+              <label class="switch">
+                <input type="checkbox" id="generator-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: DECISION PATH -->
+        <div class="decision-path-card">
+          <div class="decision-top-meta">
+            <div>
+              <h2 class="card-title">Decision path</h2>
+              <div class="card-subtitle">A live view of how each request moves through the limiter.</div>
+            </div>
+            <span class="active-algo-tag" id="active-config-badge">Token Bucket · In-Memory</span>
+          </div>
+
+          <!-- INGRESS / EGRESS DARK HEADER STRIP -->
+          <div class="stream-bar-header">
+            <div class="stream-ingress">
+              <span class="dot"></span>
+              <span>Ingress stream</span>
+            </div>
+            <div class="stream-egress">Egress →</div>
+          </div>
+
+          <!-- LIVE FLOW DIAGRAM -->
+          <div class="decision-flow-container">
+            <!-- Inbound Column -->
+            <div class="flow-inbound-col">
+              <div class="flow-node-box">
+                <div class="flow-node-label">Incoming</div>
+                <div class="flow-node-val" id="flow-incoming-val">0</div>
+              </div>
+              <div class="flow-arrow-down">↓</div>
+              <div class="flow-node-box">
+                <div class="flow-node-label">Rate</div>
+                <div class="flow-node-val" id="flow-rate-val">2/s</div>
+              </div>
+            </div>
+
+            <!-- Center Glowing Active Limiter Node -->
+            <div class="main-limiter-node" id="main-limiter-node-box">
+              <div class="limiter-icon-bubble">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                  <polyline points="2 17 12 22 22 17"></polyline>
+                  <polyline points="2 12 12 17 22 12"></polyline>
+                </svg>
+              </div>
+              <div class="limiter-node-title" id="decision-limiter-title">Token Bucket</div>
+              <div class="limiter-node-subhead">Active limiter</div>
+              <div class="limiter-healthy-tag">
+                <span class="dot"></span>
+                <span id="decision-limiter-status">Healthy</span>
+              </div>
+            </div>
+
+            <!-- Outbound Column -->
+            <div class="flow-outbound-col">
+              <div class="outcome-card allowed">
+                <div class="outcome-title">Allowed</div>
+                <div class="outcome-val" id="flow-allowed-val">0</div>
+              </div>
+              <div class="outcome-card blocked">
+                <div class="outcome-title">Blocked</div>
+                <div class="outcome-val" id="flow-blocked-val">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- BOTTOM STATUS SUMMARY PILLS -->
+          <div class="decision-bottom-summary">
+            <div class="summary-pill-card">
+              <div class="summary-pill-label">Policy decision</div>
+              <div class="summary-pill-val" id="summary-policy-decision">
+                <span class="dot"></span>
+                <span id="summary-decision-text">Request accepted</span>
+              </div>
+            </div>
+            <div class="summary-pill-card">
+              <div class="summary-pill-label">Refill / Window</div>
+              <div class="summary-pill-val" id="summary-refill-text">1 token / second</div>
+            </div>
+            <div class="summary-pill-card">
+              <div class="summary-pill-label">Persistence</div>
+              <div class="summary-pill-val" id="summary-persistence-text">In-Memory</div>
+            </div>
+          </div>
+
+          <!-- DUAL ALGORITHM DYNAMIC VISUALIZER (CANVAS & TIMELINE) -->
+          <div class="visualizer-card">
+            <div class="visualizer-header">
+              <div>
+                <h3 style="font-family:var(--font-sans); font-size:15px; font-weight:700; color:var(--text-main);">Direct Engine Simulation</h3>
+                <p style="font-size:12px; color:var(--text-muted);">Real-time canvas physics and sliding window scale.</p>
+              </div>
+            </div>
+            
+            <div class="visualizer-panes">
+              <!-- TOKEN BUCKET CANVAS -->
+              <div class="visualizer-pane" id="token-bucket-pane">
+                <div class="canvas-wrapper">
+                  <canvas id="bucket-canvas"></canvas>
+                  <div class="bucket-stats-overlay">
+                    <div>Tokens: <span id="overlay-tokens">10.00</span> / <span id="overlay-capacity">10</span></div>
+                    <div>Refill Rate: <span id="overlay-refill">1</span>/sec</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SLIDING WINDOW LOG -->
+              <div class="visualizer-pane hidden" id="sliding-window-pane">
+                <div class="timeline-wrapper">
+                  <div class="timeline-scale">
+                    <span>-10s</span>
+                    <span>-5s</span>
+                    <span>Now</span>
+                  </div>
+                  <div class="timeline-slider-track">
+                    <div class="timeline-window-overlay" id="timeline-window-overlay"></div>
+                    <div class="timeline-ticks-container" id="ticks-container"></div>
+                  </div>
+                  <div class="timeline-stats">
+                    <div>Active Window Hits: <span id="timeline-hits">0</span> / <span id="timeline-limit">10</span></div>
+                    <div>Window Duration: 10s</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- ADMIN ACTIVE CLIENT KEYS -->
+      <div class="card" id="admin-panel" style="margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div>
+            <h3 class="card-title" style="font-size:18px;">Active Limiter State Keys</h3>
+            <div class="card-subtitle">Live client identifiers tracked across the storage layer.</div>
+          </div>
+          <button class="btn btn-danger btn-sm" id="btn-admin-clear">Flush All Storage</button>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Client Identifier</th>
+                <th>Algorithm</th>
+                <th>Current State Metrics</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-keys-body">
+              <tr>
+                <td colspan="4" class="text-center text-muted">No keys logged in database.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- LIVE TELEMETRY LOG STREAM -->
+      <div class="card" style="margin-top:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary btn-sm" id="btn-export-csv">Export CSV</button>
+            <button class="btn btn-secondary btn-sm" id="btn-export-json">Export JSON</button>
+            <button class="btn btn-danger btn-sm" id="btn-clear-logs">Clear View</button>
+          </div>
+        </div>
+        <div class="table-wrapper log-table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Client</th>
+                <th>Storage</th>
+                <th>Endpoint</th>
+                <th>Status</th>
+                <th>Latency</th>
+                <th>Remaining</th>
+                <th>Reset/Retry</th>
+              </tr>
+            </thead>
+            <tbody id="log-body">
+              <tr id="log-empty-row">
+                <td colspan="8" class="text-center text-muted">Awaiting API requests...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+
   </div>
+
   <script src="app.js"></script>
 </body>
 </html>
