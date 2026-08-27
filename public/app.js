@@ -241,8 +241,8 @@ function animateBucketPhysics() {
   const elapsed = (now - lastTickTime) / 1000;
   lastTickTime = now;
   
-  if (state.algorithm === 'token-bucket' && state.currentRemaining !== null) {
-    maxCapacity = state.currentCapacity || 10;
+  if (state.algorithm === 'token-bucket') {
+    maxCapacity = state.currentCapacity || LIMIT_CONFIG['token-bucket'].capacity;
     refillRate = LIMIT_CONFIG['token-bucket'].refillRate;
     
     displayedTokens = Math.min(maxCapacity, displayedTokens + elapsed * refillRate);
@@ -326,46 +326,55 @@ let activeTicks = [];
 const WINDOW_DURATION_MS = 10000;
 
 function updateSlidingWindowTimeline() {
-  if (state.algorithm !== 'sliding-window') return;
+  if (state.algorithm === 'sliding-window') {
+    const now = Date.now();
+    const threshold = now - WINDOW_DURATION_MS;
 
-  const now = Date.now();
-  const threshold = now - WINDOW_DURATION_MS;
+    // Prune ticks that have slid past the window duration (using local reception timestamp)
+    activeTicks = activeTicks.filter(tick => tick.localTimestamp > threshold);
+    
+    const allowedHits = activeTicks.filter(t => t.allowed).length;
+    if (timelineHits) timelineHits.innerText = allowedHits;
+    
+    const limit = LIMIT_CONFIG['sliding-window'].limit;
+    const remaining = Math.max(0, limit - allowedHits);
+    if (statRemaining) statRemaining.innerText = `${remaining} / ${limit}`;
 
-  activeTicks = activeTicks.filter(tick => tick.timestamp > threshold);
-  
-  const allowedHits = activeTicks.filter(t => t.allowed).length;
-  if (timelineHits) timelineHits.innerText = allowedHits;
-  
-  const limit = LIMIT_CONFIG['sliding-window'].limit;
-  if (statRemaining) statRemaining.innerText = `${Math.max(0, limit - allowedHits)} / ${limit}`;
-
-  if (ticksContainer) {
-    ticksContainer.innerHTML = '';
-    activeTicks.forEach(tick => {
-      const elapsed = now - tick.timestamp;
-      const percentFromRight = (elapsed / WINDOW_DURATION_MS) * 100;
-      
-      if (percentFromRight >= 0 && percentFromRight <= 100) {
+    if (ticksContainer) {
+      ticksContainer.innerHTML = '';
+      activeTicks.forEach(tick => {
+        const elapsed = Math.max(0, now - tick.localTimestamp);
+        const percentFromRight = Math.min(100, Math.max(0, (elapsed / WINDOW_DURATION_MS) * 100));
+        
         const tickEl = document.createElement('div');
         tickEl.className = `timeline-tick ${tick.allowed ? '' : 'blocked'}`;
         tickEl.style.right = `${percentFromRight}%`;
         ticksContainer.appendChild(tickEl);
-      }
-    });
+      });
+    }
   }
 
+  // Continuous animation loop
   requestAnimationFrame(updateSlidingWindowTimeline);
 }
+requestAnimationFrame(updateSlidingWindowTimeline);
 
 // ==========================================================================
 // WEBSOCKET TELEMETRY CONNECTION
 // ==========================================================================
-let ws;
+let ws = null;
+const processedEventIds = new Set();
+
 function connectWebSocket() {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${wsProtocol}//${window.location.host}`;
   
-  ws = new WebSocket(wsUrl);
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.warn('WebSocket connection init failed, will use HTTP fallback:', err);
+    return;
+  }
   
   ws.onopen = () => {
     if (wsStatus) wsStatus.className = 'status-pill online';
@@ -377,25 +386,42 @@ function connectWebSocket() {
     if (wsStatus) wsStatus.className = 'status-pill offline';
     if (wsStatusText) wsStatusText.innerText = 'Retrying...';
     if (heroStatusText) heroStatusText.innerText = 'Connecting...';
-    setTimeout(connectWebSocket, 2000);
+    setTimeout(connectWebSocket, 2500);
+  };
+
+  ws.onerror = () => {
+    if (wsStatus) wsStatus.className = 'status-pill offline';
   };
   
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    
-    if (msg.type === 'CONFIG_STATE') {
-      updateActiveToggles(msg.config.algorithm, msg.config.storage, msg.redis);
-    } else if (msg.type === 'TELEMETRY_EVENT') {
-      handleTelemetryEvent(msg.data);
-    } else if (msg.type === 'RESET') {
-      clearViewStats();
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'CONFIG_STATE') {
+        updateActiveToggles(msg.config.algorithm, msg.config.storage, msg.redis);
+      } else if (msg.type === 'TELEMETRY_EVENT') {
+        handleTelemetryEvent(msg.data);
+      } else if (msg.type === 'RESET') {
+        clearViewStats();
+      }
+    } catch (e) {
+      console.error('Error parsing WS message:', e);
     }
   };
 }
 connectWebSocket();
 
-// Handle events pushed from the server WebSocket
+// Handle events pushed from the server or triggered via HTTP fallback
 function handleTelemetryEvent(event) {
+  // Deduplicate if both WS and HTTP fallback emit the same event
+  if (event.id) {
+    if (processedEventIds.has(event.id)) return;
+    processedEventIds.add(event.id);
+    if (processedEventIds.size > 200) {
+      const oldest = processedEventIds.values().next().value;
+      processedEventIds.delete(oldest);
+    }
+  }
+
   state.requests += 1;
   if (event.allowed) {
     state.success += 1;
@@ -425,10 +451,12 @@ function handleTelemetryEvent(event) {
 
   // Visual pulse on active node
   if (mainLimiterNodeBox) {
-    mainLimiterNodeBox.style.transform = 'scale(1.02)';
+    mainLimiterNodeBox.style.transform = 'scale(1.03)';
+    mainLimiterNodeBox.style.borderColor = event.allowed ? '#ea580c' : '#ef4444';
     setTimeout(() => {
       mainLimiterNodeBox.style.transform = 'scale(1)';
-    }, 120);
+      mainLimiterNodeBox.style.borderColor = 'var(--border-card)';
+    }, 150);
   }
   
   if (state.algorithm === 'token-bucket') {
@@ -439,10 +467,20 @@ function handleTelemetryEvent(event) {
   }
 
   if (state.algorithm === 'sliding-window') {
+    // Record client local timestamp for immune-to-clock-skew timeline animation
     activeTicks.push({
-      timestamp: event.timestamp,
+      localTimestamp: Date.now(),
+      serverTimestamp: event.timestamp,
       allowed: event.allowed
     });
+
+    const track = document.querySelector('.timeline-slider-track');
+    if (track) {
+      track.style.borderColor = event.allowed ? '#38bdf8' : '#ef4444';
+      setTimeout(() => {
+        track.style.borderColor = '#334155';
+      }, 200);
+    }
   }
 
   // Keep strictly the last 15 records in memory state
@@ -460,21 +498,21 @@ function appendTableRow(event) {
     logEmptyRow.style.display = 'none';
   }
   
-  const timeStr = new Date(event.timestamp).toLocaleTimeString();
+  const timeStr = new Date(event.timestamp || Date.now()).toLocaleTimeString();
   const badgeClass = event.allowed ? 'success' : 'error';
   const badgeText = event.allowed ? '200 OK' : '429 Blocked';
-  const storageClass = (event.storageMode || 'memory').toLowerCase();
+  const storageClass = (event.storageMode || state.storage || 'memory').toLowerCase();
   const storageLabel = storageClass === 'redis' ? 'Redis' : 'Memory';
   
   const rowHtml = `
     <td><span class="log-time">${timeStr}</span></td>
-    <td><span class="log-val-mono">${event.clientId}</span></td>
+    <td><span class="log-val-mono">${event.clientId || '127.0.0.1'}</span></td>
     <td><span class="log-storage-tag ${storageClass}">${storageLabel}</span></td>
-    <td><span class="log-val-mono">${event.method} ${event.url}</span></td>
+    <td><span class="log-val-mono">${event.method || 'GET'} ${event.url || '/api/request'}</span></td>
     <td><span class="badge badge-${badgeClass}">${badgeText}</span></td>
-    <td><span class="log-latency">${event.latencyMs}ms</span></td>
+    <td><span class="log-latency">${event.latencyMs ?? 0}ms</span></td>
     <td><span class="log-val-mono">${Math.floor(event.remaining)}/${event.capacity}</span></td>
-    <td><span class="log-val-mono">${event.allowed ? event.resetTimeSecs + 's (fill)' : event.retryAfter + 's (retry)'}</span></td>
+    <td><span class="log-val-mono">${event.allowed ? (event.resetTimeSecs || 10) + 's (fill)' : (event.retryAfter || 1) + 's (retry)'}</span></td>
   `;
   
   const tr = document.createElement('tr');
@@ -533,9 +571,9 @@ function updateActiveToggles(algorithm, storage = state.storage, redisInfo = sta
     if (decisionLimiterTitle) decisionLimiterTitle.innerText = 'Token Bucket';
     if (summaryRefillText) summaryRefillText.innerText = '1 token / second';
     
+    maxCapacity = LIMIT_CONFIG['token-bucket'].capacity;
+    refillRate = LIMIT_CONFIG['token-bucket'].refillRate;
     if (state.currentRemaining === null) {
-      maxCapacity = LIMIT_CONFIG['token-bucket'].capacity;
-      refillRate = LIMIT_CONFIG['token-bucket'].refillRate;
       displayedTokens = maxCapacity;
       if (overlayTokens) overlayTokens.innerText = maxCapacity.toFixed(2);
       if (overlayCapacity) overlayCapacity.innerText = maxCapacity;
@@ -547,7 +585,6 @@ function updateActiveToggles(algorithm, storage = state.storage, redisInfo = sta
     if (capacitySublabelText) capacitySublabelText.innerText = '10s sliding window';
     if (decisionLimiterTitle) decisionLimiterTitle.innerText = 'Sliding Window Log';
     if (summaryRefillText) summaryRefillText.innerText = '10s window (10 limit)';
-    requestAnimationFrame(updateSlidingWindowTimeline);
   }
 
   const algoName = algorithm === 'token-bucket' ? 'Token Bucket' : 'Sliding Window Log';
@@ -555,17 +592,17 @@ function updateActiveToggles(algorithm, storage = state.storage, redisInfo = sta
   if (activeConfigBadge) activeConfigBadge.innerText = `${algoName} · ${engineName}`;
   if (summaryPersistenceText) summaryPersistenceText.innerText = engineName;
   
+  const config = LIMIT_CONFIG[algorithm];
+  const cap = algorithm === 'token-bucket' ? config.capacity : config.limit;
+
   if (state.currentRemaining !== null) {
-    if (statRemaining) statRemaining.innerText = `${Math.floor(state.currentRemaining)} / ${state.currentCapacity}`;
+    if (statRemaining) statRemaining.innerText = `${Math.floor(state.currentRemaining)} / ${state.currentCapacity || cap}`;
   } else {
-    const config = LIMIT_CONFIG[algorithm];
-    const cap = algorithm === 'token-bucket' ? config.capacity : config.limit;
     if (statRemaining) statRemaining.innerText = `${cap} / ${cap}`;
   }
 
   if (algorithm === 'sliding-window' && timelineLimit) {
     timelineLimit.innerText = LIMIT_CONFIG['sliding-window'].limit;
-    activeTicks = [];
   }
 }
 
@@ -573,10 +610,43 @@ function updateActiveToggles(algorithm, storage = state.storage, redisInfo = sta
 // API CLIENT TRIGGERS
 // ==========================================================================
 async function sendRequest() {
+  const reqId = `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+  const startTime = performance.now();
+  
   try {
-    const res = await fetch('/api/request');
-    if (!res.ok && res.status !== 429) {
-      console.error('Request failed:', await res.text());
+    const res = await fetch('/api/request', {
+      headers: {
+        'X-Client-Request-Id': reqId
+      }
+    });
+    const latencyMs = parseFloat((performance.now() - startTime).toFixed(2));
+    const data = await res.json().catch(() => ({}));
+
+    // If WebSocket is not currently connected, provide immediate UI response via HTTP headers
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      const remaining = parseFloat(res.headers.get('X-RateLimit-Remaining') ?? (res.ok ? 9 : 0));
+      const limit = parseInt(res.headers.get('X-RateLimit-Limit') ?? 10, 10);
+      const resetTimeSecs = parseFloat(res.headers.get('X-RateLimit-Reset') ?? 10);
+      const retryAfter = parseInt(res.headers.get('Retry-After') ?? (res.ok ? 0 : 1), 10);
+      const clientId = (data.client && data.client.id) || '127.0.0.1';
+
+      handleTelemetryEvent({
+        id: reqId,
+        timestamp: Date.now(),
+        clientId,
+        clientName: `Client (${clientId})`,
+        clientTier: 'standard',
+        algorithm: state.algorithm,
+        storageMode: state.storage,
+        allowed: res.ok,
+        remaining: remaining,
+        capacity: limit,
+        retryAfter: retryAfter,
+        resetTimeSecs: resetTimeSecs,
+        method: 'GET',
+        url: '/api/request',
+        latencyMs: latencyMs
+      });
     }
   } catch (err) {
     console.error('Fetch error:', err.message);
@@ -591,7 +661,11 @@ async function postEngineConfig(algorithm = state.algorithm, storage = state.sto
       body: JSON.stringify({ algorithm, storage })
     });
     const data = await res.json();
-    if (!data.success) {
+    if (data.success) {
+      // Immediately switch local UI state without waiting for WS round-trip
+      updateActiveToggles(data.algorithm, data.storage, data.redis);
+      fetchAdminKeys();
+    } else {
       alert(data.message || data.error || 'Config update rejected by server.');
     }
   } catch (err) {
@@ -626,7 +700,7 @@ if (btnRequest) {
 if (btnBurst) {
   btnBurst.addEventListener('click', () => {
     for (let i = 0; i < 5; i++) {
-      sendRequest();
+      setTimeout(sendRequest, i * 40);
     }
   });
 }
@@ -711,6 +785,10 @@ function clearViewStats() {
     }
   }
   activeTicks = [];
+  if (timelineHits) timelineHits.innerText = '0';
+  const config = LIMIT_CONFIG[state.algorithm];
+  const cap = state.algorithm === 'token-bucket' ? config.capacity : config.limit;
+  if (statRemaining) statRemaining.innerText = `${cap} / ${cap}`;
 }
 
 // ==========================================================================
@@ -747,19 +825,15 @@ function renderAdminKeys(keys) {
       <td><strong style="color:var(--color-primary)">${k.key}</strong></td>
       <td><span class="badge">${k.type}</span></td>
       <td>${stateString}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="clearSpecificClient('${k.key}')">Reset</button></td>
+      <td><button class="btn btn-danger btn-sm" onclick="btnAdminClear.click()">Flush</button></td>
     `;
     adminKeysBody.appendChild(tr);
   });
 }
 
-window.clearSpecificClient = async function(key) {
-  console.log('Resetting client key:', key);
-};
-
 function startAdminPolling() {
   fetchAdminKeys();
-  state.adminPollIntervalId = setInterval(fetchAdminKeys, 1500);
+  state.adminPollIntervalId = setInterval(fetchAdminKeys, 2000);
 }
 
 if (btnAdminClear) {
@@ -771,6 +845,7 @@ if (btnAdminClear) {
       const res = await fetch('/api/admin/clear', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
+        clearViewStats();
         fetchAdminKeys();
       } else {
         alert(data.error || 'Failed to clear database.');
@@ -849,6 +924,16 @@ function triggerFileDownload(blob, filename) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+// Initial fetch of active server configuration and keys
+fetch('/api/config')
+  .then(res => res.json())
+  .then(data => {
+    if (data.algorithm) {
+      updateActiveToggles(data.algorithm, data.storage, data.redis);
+    }
+  })
+  .catch(err => console.warn('Could not fetch initial config:', err));
 
 // Start background admin polling
 startAdminPolling();

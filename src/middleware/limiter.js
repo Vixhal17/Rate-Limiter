@@ -58,7 +58,8 @@ export async function rateLimiter(req, res, next) {
     return next(); // If not configured, bypass
   }
 
-  const clientId = req.ip || req.headers['x-forwarded-for'] || '127.0.0.1';
+  const forwarded = req.headers['x-forwarded-for'];
+  const clientId = forwarded ? forwarded.split(',')[0].trim() : (req.ip || req.socket?.remoteAddress || '127.0.0.1');
   const clientName = `Client (${clientId})`;
   const clientTier = 'standard';
 

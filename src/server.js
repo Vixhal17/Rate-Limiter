@@ -16,6 +16,9 @@ import {
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Trust reverse proxies (Render, Railway, Heroku, AWS, Vercel, Cloudflare, etc.)
+app.set('trust proxy', true);
+
 // Enable CORS and parsing of JSON payloads
 app.use(cors());
 app.use(express.json());
